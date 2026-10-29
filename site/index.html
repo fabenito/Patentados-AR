@@ -159,8 +159,14 @@
       <div class="sec-h"><h2 id="h-usados">Usados y transferencias</h2><span class="hint">Autos que cambiaron de dueño</span></div>
       <div class="panel">
         <div class="stats" id="u-stats"></div>
-        <h3 style="margin-top:14px">Transferencias por mes <span class="hint">según el período de arriba</span></h3>
+        <h3 style="margin-top:14px"><span id="u-vol-h">Transferencias por mes</span> <span class="hint">según el período de arriba</span></h3>
+        <div class="segctl" id="u-gran">
+          <button type="button" data-g="m" aria-pressed="true">Mes</button>
+          <button type="button" data-g="w" aria-pressed="false">Semana</button>
+          <button type="button" data-g="d" aria-pressed="false">Día</button>
+        </div>
         <div id="u-mes"></div>
+        <div class="legend row-legend" id="u-mes-leg"></div>
         <div class="grid" style="margin-top:16px">
           <div><h3>Marcas más transferidas <span class="hint">tocá para filtrar</span></h3><div id="u-marcas" class="bars"></div></div>
           <div><h3>Modelos más transferidos <span class="hint">tocá para buscar</span></h3><div id="u-modelos" class="bars"></div></div>

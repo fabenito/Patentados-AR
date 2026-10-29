@@ -299,6 +299,7 @@ TRANS_COLS = {
     "titular_tipo_persona",
     "titular_porcentaje_titularidad",
     "registro_seccional_provincia",
+    "tramite_fecha",
 }
 Y0, Y1 = 1960, 2026
 # Misma clave que site/data/mapa.json. CABA no se mezcla con Buenos Aires.
@@ -421,6 +422,8 @@ def procesar_transferencias(entradas, out_dir: Path):
     g_fr = np.zeros(mlen)
     g_iy = np.zeros((mlen, ylen))
     g_ps = np.zeros((len(PROV_KEYS), mlen))
+    g_day = np.zeros((mlen, 31))
+    g_day_pj = np.zeros((mlen, 31))
     g_unk = 0.0
     nprov = len(PROV_KEYS)
 
@@ -450,20 +453,32 @@ def procesar_transferencias(entradas, out_dir: Path):
             pj = persona.str.lower().str.startswith("j")
             hacia = tipo.str.contains("A COM", regex=False)
             desde = tipo.str.contains("DE COM", regex=False) & ~hacia
-            anio = pd.to_datetime(col(df, "fecha_inscripcion_inicial", ""), errors="coerce").dt.year
+            fecha = pd.to_datetime(col(df, "fecha_inscripcion_inicial", ""), errors="coerce")
+            anio = fecha.dt.year
             yi = anio - Y0
             ok = yi.between(0, ylen - 1)
             pi = limpiar(col(df, "registro_seccional_provincia"), "").map(prov_idx)
+            ym = anio.fillna(-1).astype(int) * 100 + fecha.dt.month.fillna(0).astype(int)
+            tram = pd.to_datetime(col(df, "tramite_fecha", ""), errors="coerce")
             base = pd.DataFrame({
                 "marca": marca.to_numpy(), "fam": fam.to_numpy(), "modelo": modelo.to_numpy(),
                 "w": w.to_numpy(),
                 "wpj": np.where(pj, w, 0.0), "wto": np.where(hacia, w, 0.0), "wfr": np.where(desde, w, 0.0),
                 "pi": pi.to_numpy(), "pre": (anio.notna() & (anio < 2018)).to_numpy(),
+                "ym": ym.to_numpy(),
             })
             g_n[i] += base.w.sum()
             g_pj[i] += base.wpj.sum()
             g_to[i] += base.wto.sum()
             g_fr[i] += base.wfr.sum()
+            yy, mm = int(mes[:4]), int(mes[5:7])
+            dias = tram.dt.day.fillna(0).astype(int).to_numpy()
+            en_mes = (tram.dt.year.fillna(0).astype(int).to_numpy() == yy) & (tram.dt.month.fillna(0).astype(int).to_numpy() == mm)
+            mask = en_mes & (dias >= 1) & (dias <= 31)
+            if mask.any():
+                d0 = dias[mask] - 1
+                g_day[i] += np.bincount(d0, weights=base.w.to_numpy()[mask], minlength=31)
+                g_day_pj[i] += np.bincount(d0, weights=base.wpj.to_numpy()[mask], minlength=31)
             if ok.any():
                 gy = base[ok.to_numpy()].groupby(yi[ok].astype(int).to_numpy(), sort=False).w.sum()
                 g_iy[i, gy.index.to_numpy()] += gy.to_numpy()
@@ -488,11 +503,15 @@ def procesar_transferencias(entradas, out_dir: Path):
             g_unk += float(base.loc[base.pi < 0, "w"].sum())
             previas = base[base.pre]
             if len(previas):
-                for (b, f, name), val in previas.groupby(["marca", "fam", "modelo"], sort=False).w.sum().items():
-                    c = pre_ver.get((b, f))
+                for (b, f, year, name), val in previas.groupby(["marca", "fam", "ym", "modelo"], sort=False).w.sum().items():
+                    por = pre_ver.get((b, f))
+                    if por is None:
+                        por = {}
+                        pre_ver[(b, f)] = por
+                    c = por.get(int(year))
                     if c is None:
                         c = Counter()
-                        pre_ver[(b, f)] = c
+                        por[int(year)] = c
                     c[name] += float(val)
             print(f"  {path.name} -> {mes}: {len(df):,} filas, {base.w.sum():,.0f} vehículos", flush=True)
         if mes not in por_mes:
@@ -523,6 +542,28 @@ def procesar_transferencias(entradas, out_dir: Path):
     brands = sorted(brands_acc, key=lambda b: -brands_acc[b]["n"].sum())
     bidx = {b: i for i, b in enumerate(brands)}
     fkeys = sorted(fams, key=lambda k: -fams[k]["n"].sum())
+
+    def top_versiones(counter):
+        return [[name, limpio(v)] for name, v in counter.most_common(8) if v >= 0.5]
+
+    fv_rows, fyv_rows = [], []
+    for k in fkeys:
+        por = pre_ver.get(k)
+        if not por:
+            fv_rows.append([])
+            fyv_rows.append([])
+            continue
+        total = Counter()
+        for c in por.values():
+            total.update(c)
+        detalle = []
+        for y in sorted(por):
+            peso = float(sum(por[y].values()))
+            if peso < 0.5:
+                continue
+            detalle.append([int(y), limpio(peso), top_versiones(por[y])])
+        fv_rows.append(top_versiones(total))
+        fyv_rows.append(detalle)
     data = {
         "months": eje,
         "years": years,
@@ -546,10 +587,10 @@ def procesar_transferencias(entradas, out_dir: Path):
         "pn": [n for _, n in PROV_KEYS],
         "ps": [[limpio(x) for x in g_ps[p]] for p in range(nprov)],
         "fp": [[[j, limpio(v)] for j, v in enumerate(fams[k]["p"]) if v >= 0.5] for k in fkeys],
-        "fv": [
-            [[name, limpio(v)] for name, v in pre_ver.get(k, Counter()).most_common(8) if v >= 0.5]
-            for k in fkeys
-        ],
+        "fv": fv_rows,
+        "fyv": fyv_rows,
+        "nd": [[limpio(x) for x in g_day[i]] for i in range(mlen)],
+        "ndpj": [[limpio(x) for x in g_day_pj[i]] for i in range(mlen)],
     }
     raw = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     dest = out_dir / "usados.json.gz"
@@ -561,6 +602,7 @@ def procesar_transferencias(entradas, out_dir: Path):
     if years:
         print(f"  Inscripción inicial vista: {years[0]} a {years[-1]}.")
     print(f"  Provincia sin reconocer: {g_unk:,.0f} vehículos.")
+    print(f"  Sin día de trámite dentro del mes: {g_n.sum() - g_day.sum():,.0f} vehículos.")
 
 
 def main():

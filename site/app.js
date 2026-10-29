@@ -24,7 +24,7 @@ const NOPASS = /CAMION|SEMIRREMOLQUE|REMOLQUE|ACOPLADO|TRACTOR|CHASIS|CARRETON|B
 const SINDATO = /^SIN (ESPECIFICACION|MARCA|DATO)/;
 
 /* ---------- estado ---------- */
-const st = { period: '', months: [], origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, ev: -1, q: '', ifam: -1, upre: -1, followModel: false, token: 0 };
+const st = { period: '', months: [], origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, ev: -1, q: '', ifam: -1, upre: -1, followModel: false, uGran: '', token: 0 };
 let IX = null, CFG = { grupos: [], serie: [] }, U = null, uPick = -1, MAPA = null;
 let sel = [], selP = [];
 const MD = new Map();
@@ -413,26 +413,61 @@ function suggest(q) {
 $('#q').oninput = e => suggest(e.target.value);
 $('#q').onkeydown = e => { if (e.key === 'Enter') { const l = suggest(e.target.value); st.followModel = true; if (l.list.length) showFam(l.list[0]); else if (l.extra.length) showPre(l.extra[0]); else st.followModel = false; } };
 
+function ymText(ym) { return MESES[(ym % 100) - 1] + ' ' + Math.floor(ym / 100); }
 function preSeries(i) {
   const cats = [], vals = [];
   let total = 0, y0 = 0, y1 = 0;
-  if (!U || i === undefined || i < 0) return { cats, vals, total, y0, y1 };
-  U.years.forEach((y, k) => {
-    if (y >= 2018) return;
-    const v = U.fy[i][k] || 0;
-    cats.push(y); vals.push(v);
+  const rows = U && U.fyv && i !== undefined && i >= 0 ? U.fyv[i] : null;
+  if (!rows || !rows.length) return { cats, vals, total, y0, y1 };
+  const first = rows[0][0], last = rows[rows.length - 1][0];
+  let y = Math.floor(first / 100), m = first % 100;
+  const yEnd = Math.floor(last / 100), mEnd = last % 100;
+  const by = new Map(rows.map(r => [r[0], r[1]]));
+  while (y < yEnd || (y === yEnd && m <= mEnd)) {
+    const key = y * 100 + m;
+    const v = by.get(key) || 0;
+    cats.push(key); vals.push(v);
     if (v > 0) { total += v; if (!y0) y0 = y; y1 = y; }
-  });
+    m++; if (m === 13) { m = 1; y++; }
+  }
   return { cats, vals, total, y0, y1 };
+}
+let preYear = null;
+function preVersionRows(i) {
+  if (!U || i === undefined || i < 0) return [];
+  if (preYear != null && U.fyv && U.fyv[i]) {
+    const hit = U.fyv[i].find(r => r[0] === preYear);
+    return hit ? hit[2] : [];
+  }
+  return (U.fv && U.fv[i]) || [];
 }
 function drawPre(el, i) {
   const s = preSeries(i);
   if (!el || !s.total) return;
+  const marked = new Set();
+  if (preYear != null) {
+    const at = s.cats.indexOf(preYear);
+    if (at >= 0) marked.add(at);
+  }
   chart(el, {
-    cats: s.cats, series: [{ color: 'var(--s2)', v: s.vals }], h: 140,
+    cats: s.cats, series: [{ color: 'var(--s2)', v: s.vals }], sel: marked, h: 140,
     label: 'Inscripciones anteriores a 2018 vistas en transferencias posteriores',
-    tip: k => `${s.cats[k]}: ${f0(s.vals[k])} de este modelo se habían patentado ese año y después se transfirieron`,
-    tick: k => s.cats[k] % 5 === 0 ? String(s.cats[k]) : '',
+    tip: k => `${ymText(s.cats[k])}: ${f0(s.vals[k])} de este modelo se habían patentado ese mes y después se transfirieron. Tocá la barra para ver las versiones de ese mes.`,
+    tick: k => {
+      const ym = s.cats[k];
+      if (ym % 100 !== 1) return '';
+      const year = Math.floor(ym / 100), n = s.cats.length;
+      if (n <= 36) return String(year);
+      if (n <= 120) return year % 2 === 0 ? String(year) : '';
+      return year % 5 === 0 ? String(year) : '';
+    },
+    pick: k => {
+      if (!(s.vals[k] > 0)) return;
+      const y = s.cats[k];
+      preYear = preYear === y ? null : y;
+      drawPre(el, i);
+      drawPreVersions(i);
+    },
   });
 }
 function preBlock(i) {
@@ -442,17 +477,23 @@ function preBlock(i) {
     <div class="kv"><span><b>${f0(s.total)}</b> se habían patentado entre ${s.y0} y ${s.y1}</span><span>visto porque se transfirieron entre ${mLabel(U.months[0])} y ${mLabel(U.months[U.months.length - 1])}</span></div>
     <div id="f-pre" style="margin-top:8px"></div>
     ${preVersionsHTML(i)}
-    <p class="note">Cada barra es la fecha de inscripción inicial de autos de este modelo que después cambiaron de dueño. No es el total patentado ese año: el que nunca se transfirió en ese período no aparece, y uno transferido dos veces cuenta dos. Las versiones son el nombre completo. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
+    <p class="note">Cada barra es un mes de inscripción inicial de autos de este modelo que después cambiaron de dueño. Tocá una barra y las versiones quedan solo de ese mes; tocala de nuevo para ver todos. No es el total patentado ese mes: el que nunca se transfirió en ese período no aparece, y uno transferido dos veces cuenta dos. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
 }
 function preVersionsHTML(i) {
-  const rows = U && U.fv && i !== undefined && i >= 0 ? U.fv[i] : null;
-  if (!rows || !rows.length) return '';
-  return `<h3 style="margin-top:14px">Versiones</h3><div class="bars" id="f-pre-ver"></div>`;
+  const any = U && U.fv && i !== undefined && i >= 0 && U.fv[i] && U.fv[i].length;
+  if (!any) return '';
+  return `<h3 id="f-pre-ver-h" style="margin-top:14px">Versiones</h3><div class="bars" id="f-pre-ver"></div>`;
 }
 function drawPreVersions(i) {
-  const el = $('#f-pre-ver');
-  if (!el || !U || !U.fv || i === undefined || i < 0) return;
-  bars(el, (U.fv[i] || []).slice(0, 8).map(([name, v]) => ({ label: tc(name), v, tip: `${tc(name)}: ${f0(v)}` })));
+  const el = $('#f-pre-ver'), h = $('#f-pre-ver-h');
+  if (h) h.textContent = preYear == null ? 'Versiones' : 'Versiones en ' + ymText(preYear);
+  if (!el || !U || i === undefined || i < 0) return;
+  const rows = preVersionRows(i).slice(0, 8);
+  if (!rows.length) {
+    el.innerHTML = '<div class="more">No hay versiones con nombre para ese mes.</div>';
+    return;
+  }
+  bars(el, rows.map(([name, v]) => ({ label: tc(name), v, tip: `${tc(name)}: ${f0(v)}` })));
 }
 function markChips() {
   document.querySelectorAll('#sugg .chip').forEach(c => {
@@ -461,6 +502,7 @@ function markChips() {
   });
 }
 function showPre(i) {
+  if (i !== st.upre) preYear = null;
   st.ifam = -1; st.upre = i;
   const s = preSeries(i), lab = uFamLabel(i);
   $('#fres').innerHTML = `<div class="big"><div><div class="fam">${esc(lab)}</div><div class="l">no está en el padrón mensual desde 2018</div></div>
@@ -468,7 +510,7 @@ function showPre(i) {
       <div><div class="n num">${s.y0 || '–'}</div><div class="l">${s.y0 ? 'inscripción más antigua vista' + (s.y1 && s.y1 !== s.y0 ? ', hasta ' + s.y1 : '') : 'sin fecha anterior a 2018'}</div></div></div>
     <div id="f-pre"></div>
     ${preVersionsHTML(i)}
-    <p class="note">Este nombre no aparece en los patentamientos mensuales, o está escrito distinto. Las barras salen de la fecha de inscripción inicial en las transferencias de ${mLabel(U.months[0])} a ${mLabel(U.months[U.months.length - 1])}. No es el padrón completo de esos años. Las versiones son el nombre completo. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
+    <p class="note">Este nombre no aparece en los patentamientos mensuales, o está escrito distinto. Cada barra es un mes de inscripción inicial. Tocá una barra y las versiones quedan solo de ese mes; tocala de nuevo para ver todos. No es el padrón completo. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
   drawPre($('#f-pre'), i);
   drawPreVersions(i);
   markChips();
@@ -476,6 +518,7 @@ function showPre(i) {
   renderMapaUsados();
 }
 function showFam(ifam) {
+  if (ifam !== st.ifam) preYear = null;
   st.ifam = ifam;
   st.upre = -1;
   const [bi, fname] = IX.fams[ifam], brand = IX.brands[bi], label = tc(brand) + ' ' + tc(fname);
@@ -806,6 +849,91 @@ function flujoHTML(el, partes) {
   el.innerHTML = `<div class="stack">${partes.map(p => p.v ? `<i style="flex:${p.v};background:${p.color}" data-tip="${esc(p.label)}: ${f0(p.v)} (${pc(p.v / tot)})"></i>` : '').join('')}</div>
     <div class="legend">${partes.map(p => `<div><span class="sw" style="background:${p.color}"></span>${esc(p.label)}<span class="nn num">${f0(p.v)} · ${pc(p.v / tot)}</span></div>`).join('')}</div>`;
 }
+function isoWeekKey(y, m, d) {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const wd = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - wd);
+  const isoYear = dt.getUTCFullYear();
+  const start = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil((((dt - start) / 86400000) + 1) / 7);
+  return isoYear * 100 + week;
+}
+function rangoDias(a, b) {
+  if (a.y === b.y && a.m === b.m) return `${a.d} al ${b.d} de ${MESES[a.m - 1]} de ${a.y}`;
+  if (a.y === b.y) return `${a.d} de ${MESES[a.m - 1]} al ${b.d} de ${MESES[b.m - 1]} de ${a.y}`;
+  return `${a.d} de ${MESES[a.m - 1]} de ${a.y} al ${b.d} de ${MESES[b.m - 1]} de ${b.y}`;
+}
+function diasTransfer(ids) {
+  const out = [];
+  ids.forEach(i => {
+    const [y, mo] = U.months[i].split('-').map(Number);
+    const nDays = new Date(y, mo, 0).getDate();
+    for (let d = 1; d <= nDays; d++) {
+      out.push({ y, m: mo, d, n: U.nd[i][d - 1] || 0, pj: U.ndpj[i][d - 1] || 0, dt: new Date(y, mo - 1, d) });
+    }
+  });
+  return out;
+}
+function semanasTransfer(days) {
+  const weeks = [];
+  let cur = null;
+  days.forEach(day => {
+    const key = isoWeekKey(day.y, day.m, day.d);
+    if (!cur || cur.key !== key) {
+      cur = { key, start: day, end: day, n: 0, pj: 0 };
+      weeks.push(cur);
+    }
+    cur.n += day.n;
+    cur.pj += day.pj;
+    cur.end = day;
+  });
+  return weeks;
+}
+function volumenLegend() {
+  const el = $('#u-mes-leg');
+  if (el) el.innerHTML = '<div><span class="sw" style="background:var(--s1)"></span>Primer dueño persona</div><div><span class="sw" style="background:var(--s2)"></span>Primer dueño empresa</div>';
+}
+function renderVolumen(ids) {
+  const g = (st.uGran || (ids.length === 1 ? 'w' : 'm'));
+  document.querySelectorAll('#u-gran button').forEach(b => b.setAttribute('aria-pressed', b.dataset.g === g ? 'true' : 'false'));
+  const titulo = $('#u-vol-h');
+  if (titulo) titulo.textContent = g === 'd' ? 'Transferencias por día' : g === 'w' ? 'Transferencias por semana' : 'Transferencias por mes';
+  const serie = (n, pj) => [{ color: 'var(--s1)', v: n.map((x, i) => Math.max(0, x - pj[i])) }, { color: 'var(--s2)', v: pj }];
+  if (g === 'm' || !U.nd) {
+    chart($('#u-mes'), {
+      cats: ids, series: serie(ids.map(i => U.n[i]), ids.map(i => U.pj[i])), h: 180, label: 'Transferencias por mes',
+      tip: k => `${mLabel(U.months[ids[k]])}: ${f0(U.n[ids[k]])} transferencias, ${f0(U.pj[ids[k]])} con primer dueño empresa`,
+      tick: k => ids.length <= 14 ? mShort(U.months[ids[k]]) : U.months[ids[k]].endsWith('-01') ? U.months[ids[k]].slice(0, 4) : '',
+    });
+    volumenLegend();
+    return;
+  }
+  const days = diasTransfer(ids);
+  if (g === 'd') {
+    chart($('#u-mes'), {
+      cats: days, series: serie(days.map(x => x.n), days.map(x => x.pj)), h: 180, label: 'Transferencias por día',
+      alpha: k => { const w = days[k].dt.getDay(); return w === 0 || w === 6 ? 0.4 : 1; },
+      tip: k => `${DOW[days[k].dt.getDay()]} ${days[k].d} de ${MESES[days[k].m - 1]} de ${days[k].y}: ${f0(days[k].n)} transferencias, ${f0(days[k].pj)} con primer dueño empresa`,
+      tick: k => days.length <= 45 ? ((days[k].d === 1 || days[k].d % 5 === 0) ? String(days[k].d) : '') : (days[k].d === 1 ? MC[days[k].m - 1] + ' ' + String(days[k].y).slice(2) : ''),
+    });
+    volumenLegend();
+    return;
+  }
+  const weeks = semanasTransfer(days);
+  chart($('#u-mes'), {
+    cats: weeks, series: serie(weeks.map(x => x.n), weeks.map(x => x.pj)), h: 180, label: 'Transferencias por semana',
+    tip: k => `Semana del ${rangoDias(weeks[k].start, weeks[k].end)}: ${f0(weeks[k].n)} transferencias, ${f0(weeks[k].pj)} con primer dueño empresa`,
+    tick: k => {
+      if (weeks.length <= 18) return weeks[k].start.d + ' ' + MC[weeks[k].start.m - 1];
+      const prev = weeks[k - 1];
+      if (!prev || weeks[k].start.y !== prev.start.y) return String(weeks[k].start.y);
+      if (weeks.length <= 80 && weeks[k].start.m !== prev.start.m) return MC[weeks[k].start.m - 1];
+      return '';
+    },
+  });
+  volumenLegend();
+}
+document.querySelectorAll('#u-gran button').forEach(b => { b.onclick = () => { st.uGran = b.dataset.g; renderUsados(); }; });
 function renderUsados() {
   const box = $('#u-stats');
   if (!box) return;
@@ -816,7 +944,7 @@ function renderUsados() {
   const ids = transferIds();
   if (!ids.length) {
     box.innerHTML = '<div class="stat"><div class="k">No hay transferencias en el período elegido.</div></div>';
-    ['#u-mes', '#u-marcas', '#u-modelos', '#u-dueno', '#u-flujo', '#u-empresa', '#u-desde', '#u-hacia', '#u-anio', '#u-anio-leg', '#u-det'].forEach(s => { const n = $(s); if (n) n.innerHTML = ''; });
+    ['#u-mes', '#u-mes-leg', '#u-marcas', '#u-modelos', '#u-dueno', '#u-flujo', '#u-empresa', '#u-desde', '#u-hacia', '#u-anio', '#u-anio-leg', '#u-det'].forEach(s => { const n = $(s); if (n) n.innerHTML = ''; });
     return;
   }
   let n = 0, pj = 0, to = 0, fr = 0;
@@ -824,14 +952,7 @@ function renderUsados() {
   const stats = [[f0(n), 'Vehículos transferidos'], [pc(pj / n), 'Primer dueño empresa'], [pc(fr / n), 'Desde comerciante habitual'], [pc(to / n), 'Hacia comerciante habitual']];
   box.innerHTML = stats.map(x => `<div class="stat"><div class="v num">${x[0]}</div><div class="k">${x[1]}</div></div>`).join('');
   const perTxt = ids.length === 1 ? mLabel(U.months[ids[0]]) : `${mShort(U.months[ids[0]])} a ${mShort(U.months[ids[ids.length - 1]])}`;
-  chart($('#u-mes'), {
-    cats: ids, series: [
-      { color: 'var(--s1)', v: ids.map(i => U.n[i] - U.pj[i]) },
-      { color: 'var(--s2)', v: ids.map(i => U.pj[i]) },
-    ], h: 180, label: 'Transferencias por mes',
-    tip: k => `${mLabel(U.months[ids[k]])}: ${f0(U.n[ids[k]])} transferencias, ${f0(U.pj[ids[k]])} con primer dueño empresa`,
-    tick: k => ids.length <= 14 ? mShort(U.months[ids[k]]) : U.months[ids[k]].endsWith('-01') ? U.months[ids[k]].slice(0, 4) : '',
-  });
+  renderVolumen(ids);
   const brands = U.brands.map((_, b) => [b, sumAt(U.bs[b], ids)]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
   bars($('#u-marcas'), brands.slice(0, 12).map(([b, v]) => ({
     label: tc(U.brands[b]), v, tip: `${tc(U.brands[b])}: ${f0(v)} (${pc(v / n)})`,

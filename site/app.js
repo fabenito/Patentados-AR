@@ -401,9 +401,10 @@ function suggest(q) {
   const chips = list.map(i => {
     const f = IX.fams[i], key = IX.brands[f[0]] + '|' + f[1];
     const ui = U ? U.famM.get(key) : undefined;
-    const pre = ui !== undefined && U.pre[ui] > 0 ? ` · antes de 2018: ${f0(U.pre[ui])}` : '';
+    const preN = ui !== undefined ? preShown(ui) : 0;
+    const pre = preN > 0 ? ` · antes de 2018: ${f0(preN)}` : '';
     return `<button type="button" class="chip" data-f="${i}" aria-pressed="${i === st.ifam}">${esc(tc(IX.brands[f[0]]) + ' ' + tc(f[1]))}<span class="c num">${f0(IX.ftot[i])}${pre}</span></button>`;
-  }).concat(extra.map(i => `<button type="button" class="chip" data-u="${i}" aria-pressed="${i === st.upre}">${esc(uFamLabel(i))}<span class="c num">antes de 2018: ${f0(U.pre[i])}</span></button>`));
+  }).concat(extra.map(i => `<button type="button" class="chip" data-u="${i}" aria-pressed="${i === st.upre}">${esc(uFamLabel(i))}<span class="c num">antes de 2018: ${f0(preShown(i) || U.pre[i])}</span></button>`));
   $('#sugg').innerHTML = chips.length ? chips.join('') : '<span class="note">No encontré ese modelo. Probá con una parte del nombre.</span>';
   $('#sugg').querySelectorAll('.chip').forEach(c => {
     c.onclick = () => { st.followModel = true; c.dataset.u !== undefined ? showPre(+c.dataset.u) : showFam(+c.dataset.f); };
@@ -414,15 +415,53 @@ $('#q').oninput = e => suggest(e.target.value);
 $('#q').onkeydown = e => { if (e.key === 'Enter') { const l = suggest(e.target.value); st.followModel = true; if (l.list.length) showFam(l.list[0]); else if (l.extra.length) showPre(l.extra[0]); else st.followModel = false; } };
 
 function ymText(ym) { return MESES[(ym % 100) - 1] + ' ' + Math.floor(ym / 100); }
+function rarePreCount(i) {
+  if (!U || !U.rvM || i == null || i < 0) return null;
+  const f = U.fams[i];
+  if (!f) return null;
+  const items = U.rvM.get(norm(U.brands[f[0]]) + '|' + norm(f[1]));
+  if (!items || !items.length) return null;
+  const modelos = new Set(items.map(it => it[2]));
+  const month = new Map(), byMonthVer = new Map(), allVer = new Map();
+  const add = (ym, modelo, n) => {
+    if (!(n > 0) || !ym) return;
+    month.set(ym, (month.get(ym) || 0) + n);
+    allVer.set(modelo, (allVer.get(modelo) || 0) + n);
+    let mv = byMonthVer.get(ym);
+    if (!mv) { mv = new Map(); byMonthVer.set(ym, mv); }
+    mv.set(modelo, (mv.get(modelo) || 0) + n);
+  };
+  items.forEach(item => item[3].forEach(car => {
+    const insc = String(car[0] || '');
+    if (insc.length < 7) return;
+    const y = +insc.slice(0, 4), mo = +insc.slice(5, 7);
+    if (!(y > 0 && y < 2018 && mo >= 1 && mo <= 12)) return;
+    add(y * 100 + mo, item[2], 1);
+  }));
+  ((U.fyv && U.fyv[i]) || []).forEach(row => {
+    (row[2] || []).forEach(([name, v]) => { if (!modelos.has(name)) add(row[0], name, v); });
+  });
+  return { month, byMonthVer, allVer };
+}
+function preShown(i) {
+  const rc = rarePreCount(i);
+  if (!rc) return (U && U.pre && U.pre[i]) || 0;
+  let t = 0;
+  rc.month.forEach(v => { t += v; });
+  return t || (U.pre && U.pre[i]) || 0;
+}
 function preSeries(i) {
   const cats = [], vals = [];
   let total = 0, y0 = 0, y1 = 0;
+  const rc = rarePreCount(i);
   const rows = U && U.fyv && i !== undefined && i >= 0 ? U.fyv[i] : null;
-  if (!rows || !rows.length) return { cats, vals, total, y0, y1 };
-  const first = rows[0][0], last = rows[rows.length - 1][0];
+  const src = rc && rc.month.size ? rc.month : null;
+  if (!src && (!rows || !rows.length)) return { cats, vals, total, y0, y1, once: false };
+  const keys = src ? [...src.keys()].sort((a, b) => a - b) : rows.map(r => r[0]);
+  const first = keys[0], last = keys[keys.length - 1];
   let y = Math.floor(first / 100), m = first % 100;
   const yEnd = Math.floor(last / 100), mEnd = last % 100;
-  const by = new Map(rows.map(r => [r[0], r[1]]));
+  const by = src || new Map(rows.map(r => [r[0], r[1]]));
   while (y < yEnd || (y === yEnd && m <= mEnd)) {
     const key = y * 100 + m;
     const v = by.get(key) || 0;
@@ -430,11 +469,16 @@ function preSeries(i) {
     if (v > 0) { total += v; if (!y0) y0 = y; y1 = y; }
     m++; if (m === 13) { m = 1; y++; }
   }
-  return { cats, vals, total, y0, y1 };
+  return { cats, vals, total, y0, y1, once: !!src };
 }
 let preYear = null;
 function preVersionRows(i) {
   if (!U || i === undefined || i < 0) return [];
+  const rc = rarePreCount(i);
+  if (rc && rc.allVer.size) {
+    const src = preYear != null ? (rc.byMonthVer.get(preYear) || new Map()) : rc.allVer;
+    return [...src.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  }
   if (preYear != null && U.fyv && U.fyv[i]) {
     const hit = U.fyv[i].find(r => r[0] === preYear);
     return hit ? hit[2] : [];
@@ -452,7 +496,9 @@ function drawPre(el, i) {
   chart(el, {
     cats: s.cats, series: [{ color: 'var(--s2)', v: s.vals }], sel: marked, h: 140,
     label: 'Inscripciones anteriores a 2018 vistas en transferencias posteriores',
-    tip: k => `${ymText(s.cats[k])}: ${f0(s.vals[k])} de este modelo se habían patentado ese mes y después se transfirieron. Tocá la barra para ver las versiones de ese mes.`,
+    tip: k => s.once
+      ? `${ymText(s.cats[k])}: ${f0(s.vals[k])} ${Math.round(s.vals[k]) === 1 ? 'auto patentado' : 'autos patentados'} ese mes. Tocá la barra para ver las versiones.`
+      : `${ymText(s.cats[k])}: ${f0(s.vals[k])} de este modelo se habían patentado ese mes y después se transfirieron. Tocá la barra para ver las versiones de ese mes.`,
     tick: k => {
       const ym = s.cats[k];
       if (ym % 100 !== 1) return '';
@@ -473,11 +519,15 @@ function drawPre(el, i) {
 function preBlock(i) {
   const s = preSeries(i);
   if (!s.total) return '';
+  const cuantos = s.once && Math.round(s.total) === 1 ? 'se patentó' : 'se habían patentado';
+  const aviso = s.once
+    ? 'Cada auto cuenta una sola vez. Si después cambió de dueño, sigue siendo el mismo patentamiento: lo separa la fecha en que se patentó y el año modelo.'
+    : 'No es el total patentado ese mes: el que nunca se transfirió en ese período no aparece, y uno transferido dos veces cuenta dos.';
   return `<h3 style="margin-top:18px">Antes de 2018</h3>
-    <div class="kv"><span><b>${f0(s.total)}</b> se habían patentado entre ${s.y0} y ${s.y1}</span><span>visto porque se transfirieron entre ${mLabel(U.months[0])} y ${mLabel(U.months[U.months.length - 1])}</span></div>
+    <div class="kv"><span><b>${f0(s.total)}</b> ${cuantos} entre ${s.y0} y ${s.y1}</span><span>visto porque se transfirieron entre ${mLabel(U.months[0])} y ${mLabel(U.months[U.months.length - 1])}</span></div>
     <div id="f-pre" style="margin-top:8px"></div>
     ${preVersionsHTML(i)}
-    <p class="note">Cada barra es un mes de inscripción inicial de autos de este modelo que después cambiaron de dueño. Tocá una barra y las versiones quedan solo de ese mes; tocala de nuevo para ver todos. No es el total patentado ese mes: el que nunca se transfirió en ese período no aparece, y uno transferido dos veces cuenta dos. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
+    <p class="note">Cada barra es un mes de inscripción inicial de autos de este modelo que después cambiaron de dueño. Tocá una barra y las versiones quedan solo de ese mes; tocala de nuevo para ver todos. ${aviso} De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
 }
 function preVersionsHTML(i) {
   const any = U && U.fv && i !== undefined && i >= 0 && U.fv[i] && U.fv[i].length;
@@ -505,13 +555,15 @@ function showPre(i) {
   if (i !== st.upre) preYear = null;
   st.ifam = -1; st.upre = i;
   const s = preSeries(i), lab = uFamLabel(i);
+  const inscLbl = Math.round(s.total) === 1 ? 'patentado antes de 2018 y transferido después' : 'patentados antes de 2018 y transferidos después';
+  const once = s.once ? ' Cada auto cuenta una sola vez: un cambio de dueño no suma otro patentamiento.' : '';
   $('#fres').innerHTML = `<div class="big"><div><div class="fam">${esc(lab)}</div><div class="l">no está en el padrón mensual desde 2018</div></div>
-      <div><div class="n num">${f0(s.total)}</div><div class="l">patentados antes de 2018 y transferidos después</div></div>
+      <div><div class="n num">${f0(s.total)}</div><div class="l">${inscLbl}</div></div>
       <div><div class="n num">${s.y0 || '–'}</div><div class="l">${s.y0 ? 'inscripción más antigua vista' + (s.y1 && s.y1 !== s.y0 ? ', hasta ' + s.y1 : '') : 'sin fecha anterior a 2018'}</div></div></div>
     <div id="f-pre"></div>
     ${preVersionsHTML(i)}
     <div id="f-rc"></div>
-    <p class="note">Este nombre no aparece en los patentamientos mensuales, o está escrito distinto. Cada barra es un mes de inscripción inicial. Tocá una barra y las versiones quedan solo de ese mes; tocala de nuevo para ver todos. No es el padrón completo. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
+    <p class="note">Este nombre no aparece en los patentamientos mensuales, o está escrito distinto. Cada barra es un mes de inscripción inicial. Tocá una barra y las versiones quedan solo de ese mes; tocala de nuevo para ver todos.${once} No es el padrón completo. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
   drawPre($('#f-pre'), i);
   drawPreVersions(i);
   const uf = U.fams[i];

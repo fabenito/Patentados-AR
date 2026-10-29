@@ -510,9 +510,12 @@ function showPre(i) {
       <div><div class="n num">${s.y0 || '–'}</div><div class="l">${s.y0 ? 'inscripción más antigua vista' + (s.y1 && s.y1 !== s.y0 ? ', hasta ' + s.y1 : '') : 'sin fecha anterior a 2018'}</div></div></div>
     <div id="f-pre"></div>
     ${preVersionsHTML(i)}
+    <div id="f-rc"></div>
     <p class="note">Este nombre no aparece en los patentamientos mensuales, o está escrito distinto. Cada barra es un mes de inscripción inicial. Tocá una barra y las versiones quedan solo de ese mes; tocala de nuevo para ver todos. No es el padrón completo. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
   drawPre($('#f-pre'), i);
   drawPreVersions(i);
+  const uf = U.fams[i];
+  renderRecorrido(U.brands[uf[0]], uf[1]);
   markChips();
   renderMapa();
   renderMapaUsados();
@@ -569,6 +572,7 @@ function showFam(ifam) {
     <div id="f-chart" style="margin-top:16px"></div>
     ${detail}
     ${preBlock(U ? U.famM.get(brand + '|' + fname) : undefined)}
+    <div id="f-rc"></div>
     <p class="note">Las barras azules son patentamientos iniciales del padrón mensual. Un auto patentado antes de ${esc(mLabel(IX.months[0].m))} no entra en esas barras. Los precios de Mercado Libre son los de hoy.</p>`;
   if (after) after();
   chart($('#f-chart'), {
@@ -579,6 +583,7 @@ function showFam(ifam) {
   });
   const ui = U ? U.famM.get(brand + '|' + fname) : undefined;
   if (ui !== undefined) { drawPre($('#f-pre'), ui); drawPreVersions(ui); }
+  renderRecorrido(brand, fname);
   markChips();
   renderMapa();
   renderMapaUsados();
@@ -823,6 +828,13 @@ async function loadUsados() {
     d.famM = new Map(d.fams.map((f, i) => [d.brands[f[0]] + '|' + f[1], i]));
     d.search = d.fams.map(f => norm(d.brands[f[0]] + ' ' + f[1]));
     d.pre = d.fy.map(row => { let t = 0; for (let y = 0; y < d.years.length; y++) if (d.years[y] < 2018) t += row[y] || 0; return t; });
+    d.rvM = new Map();
+    (d.rv || []).forEach(item => {
+      const k = norm(item[0]) + '|' + norm(item[1]);
+      let arr = d.rvM.get(k);
+      if (!arr) { arr = []; d.rvM.set(k, arr); }
+      arr.push(item);
+    });
     U = d;
   } catch (e) {
     U = null;
@@ -833,6 +845,41 @@ async function loadUsados() {
   if ($('#q')) suggest($('#q').value);
   if (U && st.ifam >= 0) showFam(st.ifam);
   else if (U && st.upre >= 0) showPre(st.upre);
+}
+function fechaCorta(iso) {
+  if (!iso || String(iso).length < 8) return 'sin fecha';
+  const [y, m, d] = String(iso).split('-').map(Number);
+  if (!y || !m || !d) return 'sin fecha';
+  return d + ' ' + MC[m - 1] + ' ' + y;
+}
+function renderRecorrido(brand, fam) {
+  const el = $('#f-rc');
+  if (!el) return;
+  const items = (U && U.rvM && U.rvM.get(norm(brand) + '|' + norm(fam))) || [];
+  const cars = [];
+  items.forEach(item => item[3].forEach(car => cars.push({ modelo: item[2], insc: car[0], anio: car[1], hops: car[2] })));
+  if (!cars.length || cars.length > 24) { el.innerHTML = ''; return; }
+  cars.sort((a, b) => {
+    const ch = c => c.hops.reduce((s, h, i) => s + (i && h[1] !== c.hops[i - 1][1] ? 1 : 0), 0);
+    return ch(b) - ch(a) || String(a.insc).localeCompare(String(b.insc));
+  });
+  const draw = n => {
+    const html = cars.slice(0, n).map(car => {
+      const steps = car.hops.map((h, i) => {
+        const prev = i ? car.hops[i - 1][1] : '';
+        const donde = h[1] ? provNice(h[1], h[1]) : 'sin provincia';
+        const desde = prev && prev !== h[1] ? ` <span class="from">desde ${esc(provNice(prev, prev))}</span>` : '';
+        return `<li><span class="when">${esc(fechaCorta(h[0]))}</span><b>${esc(donde)}</b>${desde}</li>`;
+      }).join('');
+      const anio = car.anio ? `<span>año modelo ${car.anio}</span>` : '';
+      return `<div class="unidad"><div class="kv"><span><b>${esc(tc(car.modelo))}</b></span><span>inscripto el ${esc(fechaCorta(car.insc))}</span>${anio}</div><ol class="path">${steps}</ol></div>`;
+    }).join('');
+    const more = cars.length > n ? `<button type="button" class="btn more-btn" id="f-rc-more">Mostrar más (${f0(cars.length - n)} restantes)</button>` : '';
+    el.innerHTML = `<h3 style="margin-top:18px">Recorrido</h3>${html}${more}<p class="note">Cada auto se separa por la fecha en que se patentó y el año modelo, porque el archivo no trae el dominio. La provincia es la del registro de esa transferencia. Cuando cambia, el auto pasó de una provincia a la otra. Solo entra si ese nombre tuvo pocas transferencias.</p>`;
+    const btn = $('#f-rc-more');
+    if (btn) btn.onclick = () => draw(n + 8);
+  };
+  draw(8);
 }
 function usadosSpan(brand, fname) {
   if (!U) return '';

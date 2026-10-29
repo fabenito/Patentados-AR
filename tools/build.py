@@ -300,6 +300,7 @@ TRANS_COLS = {
     "titular_porcentaje_titularidad",
     "registro_seccional_provincia",
     "tramite_fecha",
+    "automotor_anio_modelo",
 }
 Y0, Y1 = 1960, 2026
 # Misma clave que site/data/mapa.json. CABA no se mezcla con Buenos Aires.
@@ -416,6 +417,10 @@ def procesar_transferencias(entradas, out_dir: Path):
     mlen, ylen = len(eje), Y1 - Y0 + 1
     fams = {}
     pre_ver = {}
+    eventos = {}
+    overflow = set()
+    RARE_MAX = 80
+    RARE_FAM = 24
     g_n = np.zeros(mlen)
     g_pj = np.zeros(mlen)
     g_to = np.zeros(mlen)
@@ -513,6 +518,30 @@ def procesar_transferencias(entradas, out_dir: Path):
                         c = Counter()
                         por[int(year)] = c
                     c[name] += float(val)
+            viajes = pd.DataFrame({
+                "marca": marca.to_numpy(),
+                "modelo": modelo.to_numpy(),
+                "td": tram.dt.strftime("%Y-%m-%d").fillna("").to_numpy(),
+                "rp": limpiar(col(df, "registro_seccional_provincia"), "").map(prov_clave).to_numpy(),
+                "insc": fecha.dt.strftime("%Y-%m-%d").fillna("").to_numpy(),
+                "am": pd.to_numeric(col(df, "automotor_anio_modelo", "0"), errors="coerce").fillna(0).astype(int).to_numpy(),
+            })
+            viajes = viajes[viajes.td != ""]
+            if len(viajes):
+                for (b, name, tdia, prov, insc_d, am), _n in viajes.groupby(
+                    ["marca", "modelo", "td", "rp", "insc", "am"], sort=False
+                ).size().items():
+                    key = (b, name)
+                    if key in overflow:
+                        continue
+                    lst = eventos.get(key)
+                    if lst is None:
+                        lst = []
+                        eventos[key] = lst
+                    lst.append((tdia, prov or "", insc_d, int(am)))
+                    if len(lst) > RARE_MAX:
+                        overflow.add(key)
+                        eventos.pop(key, None)
             print(f"  {path.name} -> {mes}: {len(df):,} filas, {base.w.sum():,.0f} vehículos", flush=True)
         if mes not in por_mes:
             print(f"  sin archivo: {mes}", flush=True)
@@ -564,6 +593,28 @@ def procesar_transferencias(entradas, out_dir: Path):
             detalle.append([int(y), limpio(peso), top_versiones(por[y])])
         fv_rows.append(top_versiones(total))
         fyv_rows.append(detalle)
+    rv = []
+    for (marca, modelo), evs in eventos.items():
+        cars = {}
+        for tdia, prov, insc_d, am in evs:
+            cars.setdefault((insc_d, int(am)), {})[(tdia, prov)] = None
+        car_list = []
+        for (insc_d, am), hops in cars.items():
+            seq = [[f, p] for f, p in sorted(hops)]
+            provs = [p for _, p in seq]
+            changes = sum(a != b for a, b in zip(provs, provs[1:]))
+            car_list.append((changes, insc_d or "9999", [insc_d, am, seq]))
+        car_list.sort(key=lambda c: (-c[0], c[1]))
+        rv.append([marca, familia(modelo), modelo, [c[2] for c in car_list]])
+    rv.sort(key=lambda r: (r[0], r[1], r[2]))
+    # A family like Hilux is thousands of one-off spellings. The timeline is for a name
+    # that is one car, or only a few, in the whole country.
+    por_fam = {}
+    for item in rv:
+        k = (item[0], item[1])
+        por_fam[k] = por_fam.get(k, 0) + len(item[3])
+    rv_all = len(rv)
+    rv = [item for item in rv if por_fam[(item[0], item[1])] <= RARE_FAM]
     data = {
         "months": eje,
         "years": years,
@@ -591,6 +642,7 @@ def procesar_transferencias(entradas, out_dir: Path):
         "fyv": fyv_rows,
         "nd": [[limpio(x) for x in g_day[i]] for i in range(mlen)],
         "ndpj": [[limpio(x) for x in g_day_pj[i]] for i in range(mlen)],
+        "rv": rv,
     }
     raw = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     dest = out_dir / "usados.json.gz"
@@ -603,6 +655,7 @@ def procesar_transferencias(entradas, out_dir: Path):
         print(f"  Inscripción inicial vista: {years[0]} a {years[-1]}.")
     print(f"  Provincia sin reconocer: {g_unk:,.0f} vehículos.")
     print(f"  Sin día de trámite dentro del mes: {g_n.sum() - g_day.sum():,.0f} vehículos.")
+    print(f"  Recorridos de modelos con pocas transferencias: {len(rv):,} nombres, hasta {RARE_FAM} autos cada uno. {rv_all - len(rv):,} quedaron afuera por ser un modelo común. {len(overflow):,} por tener más de {RARE_MAX} transferencias.")
 
 
 def main():

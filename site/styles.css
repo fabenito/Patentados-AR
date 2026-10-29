@@ -68,6 +68,13 @@ section{margin-top:28px}
 .segctl{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
 .segctl button{border:1px solid var(--line);background:var(--wash);border-radius:99px;padding:4px 12px;cursor:pointer;font-size:13px}
 .segctl button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.path{list-style:none;margin:6px 0 14px;padding:0}
+.path li{position:relative;padding:2px 0 8px 16px}
+.path li::before{content:"";position:absolute;left:0;top:7px;width:8px;height:8px;border-radius:50%;background:var(--s2)}
+.path li:not(:last-child)::after{content:"";position:absolute;left:3px;top:16px;bottom:-2px;width:2px;background:var(--line)}
+.path .when{color:var(--mute);font-size:13px;margin-right:8px}
+.path .from{color:var(--ink2);font-size:13px;margin-left:6px}
+.unidad{margin-top:12px}
 .big{display:flex;gap:10px 28px;flex-wrap:wrap;align-items:flex-end;margin:18px 0 6px}
 .big .n{font:700 60px/.95 var(--f-display);letter-spacing:.01em}
 .big .l{color:var(--ink2);font-size:14px;max-width:22ch}

@@ -20,6 +20,7 @@ import gzip
 import json
 import re
 import sys
+import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -297,8 +298,59 @@ TRANS_COLS = {
     "automotor_modelo_descripcion",
     "titular_tipo_persona",
     "titular_porcentaje_titularidad",
+    "registro_seccional_provincia",
 }
 Y0, Y1 = 1960, 2026
+# Misma clave que site/data/mapa.json. CABA no se mezcla con Buenos Aires.
+PROV_KEYS = [
+    ("caba", "CABA"),
+    ("buenos aires", "Buenos Aires"),
+    ("catamarca", "Catamarca"),
+    ("chaco", "Chaco"),
+    ("chubut", "Chubut"),
+    ("cordoba", "Córdoba"),
+    ("corrientes", "Corrientes"),
+    ("entre rios", "Entre Ríos"),
+    ("formosa", "Formosa"),
+    ("jujuy", "Jujuy"),
+    ("la pampa", "La Pampa"),
+    ("la rioja", "La Rioja"),
+    ("mendoza", "Mendoza"),
+    ("misiones", "Misiones"),
+    ("neuquen", "Neuquén"),
+    ("rio negro", "Río Negro"),
+    ("salta", "Salta"),
+    ("san juan", "San Juan"),
+    ("san luis", "San Luis"),
+    ("santa cruz", "Santa Cruz"),
+    ("santa fe", "Santa Fe"),
+    ("santiago del estero", "Santiago del Estero"),
+    ("tierra del fuego", "Tierra del Fuego"),
+    ("tucuman", "Tucumán"),
+]
+PROV_I = {k: i for i, (k, _) in enumerate(PROV_KEYS)}
+
+
+def prov_clave(s):
+    t = unicodedata.normalize("NFD", str(s or "")).encode("ascii", "ignore").decode().lower()
+    t = re.sub(r"[.]", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    if "autonoma" in t or t in ("caba", "capital federal", "ciudad de buenos aires"):
+        return "caba"
+    if t.startswith("tierra del fuego"):
+        return "tierra del fuego"
+    return t
+
+
+_PROV_CACHE = {}
+
+
+def prov_idx(s):
+    i = _PROV_CACHE.get(s)
+    if i is None:
+        i = PROV_I.get(prov_clave(s), -1)
+        _PROV_CACHE[s] = i
+    return i
 
 
 def leer_transferencia(path: Path) -> pd.DataFrame:
@@ -362,15 +414,27 @@ def procesar_transferencias(entradas, out_dir: Path):
     pos = {m: i for i, m in enumerate(eje)}
     mlen, ylen = len(eje), Y1 - Y0 + 1
     fams = {}
+    pre_ver = {}
     g_n = np.zeros(mlen)
     g_pj = np.zeros(mlen)
     g_to = np.zeros(mlen)
     g_fr = np.zeros(mlen)
     g_iy = np.zeros((mlen, ylen))
+    g_ps = np.zeros((len(PROV_KEYS), mlen))
+    g_unk = 0.0
+    nprov = len(PROV_KEYS)
 
     def acc():
         return {"n": np.zeros(mlen), "pj": np.zeros(mlen), "to": np.zeros(mlen),
-                "fr": np.zeros(mlen), "y": np.zeros(ylen)}
+                "fr": np.zeros(mlen), "y": np.zeros(ylen), "p": np.zeros(nprov)}
+
+    def slot_de(b, f):
+        key = (b, f)
+        slot = fams.get(key)
+        if slot is None:
+            slot = acc()
+            fams[key] = slot
+        return slot
 
     for mes in eje:
         for path in por_mes.get(mes, []):
@@ -378,8 +442,9 @@ def procesar_transferencias(entradas, out_dir: Path):
             i = pos[mes]
             w = pd.to_numeric(col(df, "titular_porcentaje_titularidad", "100"), errors="coerce").fillna(100)
             w = w.clip(1, 100) / 100
+            modelo = limpiar(col(df, "automotor_modelo_descripcion"), "SIN DATO")
             marca = limpiar(col(df, "automotor_marca_descripcion"), "SIN DATO")
-            fam = limpiar(col(df, "automotor_modelo_descripcion"), "SIN DATO").map(familia)
+            fam = modelo.map(familia)
             persona = limpiar(col(df, "titular_tipo_persona"), "")
             tipo = limpiar(col(df, "tramite_tipo"), "").str.upper()
             pj = persona.str.lower().str.startswith("j")
@@ -388,9 +453,12 @@ def procesar_transferencias(entradas, out_dir: Path):
             anio = pd.to_datetime(col(df, "fecha_inscripcion_inicial", ""), errors="coerce").dt.year
             yi = anio - Y0
             ok = yi.between(0, ylen - 1)
+            pi = limpiar(col(df, "registro_seccional_provincia"), "").map(prov_idx)
             base = pd.DataFrame({
-                "marca": marca.to_numpy(), "fam": fam.to_numpy(), "w": w.to_numpy(),
+                "marca": marca.to_numpy(), "fam": fam.to_numpy(), "modelo": modelo.to_numpy(),
+                "w": w.to_numpy(),
                 "wpj": np.where(pj, w, 0.0), "wto": np.where(hacia, w, 0.0), "wfr": np.where(desde, w, 0.0),
+                "pi": pi.to_numpy(), "pre": (anio.notna() & (anio < 2018)).to_numpy(),
             })
             g_n[i] += base.w.sum()
             g_pj[i] += base.wpj.sum()
@@ -401,10 +469,7 @@ def procesar_transferencias(entradas, out_dir: Path):
                 g_iy[i, gy.index.to_numpy()] += gy.to_numpy()
             agg = base.groupby(["marca", "fam"], sort=False)[["w", "wpj", "wto", "wfr"]].sum()
             for (b, f), row in agg.iterrows():
-                slot = fams.get((b, f))
-                if slot is None:
-                    slot = acc()
-                    fams[(b, f)] = slot
+                slot = slot_de(b, f)
                 slot["n"][i] += row.w
                 slot["pj"][i] += row.wpj
                 slot["to"][i] += row.wto
@@ -414,6 +479,21 @@ def procesar_transferencias(entradas, out_dir: Path):
                 ybase["yi"] = yi[ok].astype(int).to_numpy()
                 for (b, f, k), val in ybase.groupby(["marca", "fam", "yi"], sort=False).w.sum().items():
                     fams[(b, f)]["y"][int(k)] += val
+            conocidas = base[base.pi >= 0]
+            if len(conocidas):
+                gp = conocidas.groupby("pi", sort=False).w.sum()
+                g_ps[gp.index.to_numpy().astype(int), i] += gp.to_numpy()
+                for (b, f, p), val in conocidas.groupby(["marca", "fam", "pi"], sort=False).w.sum().items():
+                    slot_de(b, f)["p"][int(p)] += val
+            g_unk += float(base.loc[base.pi < 0, "w"].sum())
+            previas = base[base.pre]
+            if len(previas):
+                for (b, f, name), val in previas.groupby(["marca", "fam", "modelo"], sort=False).w.sum().items():
+                    c = pre_ver.get((b, f))
+                    if c is None:
+                        c = Counter()
+                        pre_ver[(b, f)] = c
+                    c[name] += float(val)
             print(f"  {path.name} -> {mes}: {len(df):,} filas, {base.w.sum():,.0f} vehículos", flush=True)
         if mes not in por_mes:
             print(f"  sin archivo: {mes}", flush=True)
@@ -462,6 +542,14 @@ def procesar_transferencias(entradas, out_dir: Path):
         "fto": matriz(fams, fkeys, "to"),
         "ffr": matriz(fams, fkeys, "fr"),
         "fy": matriz(fams, fkeys, "y"),
+        "pk": [k for k, _ in PROV_KEYS],
+        "pn": [n for _, n in PROV_KEYS],
+        "ps": [[limpio(x) for x in g_ps[p]] for p in range(nprov)],
+        "fp": [[[j, limpio(v)] for j, v in enumerate(fams[k]["p"]) if v >= 0.5] for k in fkeys],
+        "fv": [
+            [[name, limpio(v)] for name, v in pre_ver.get(k, Counter()).most_common(8) if v >= 0.5]
+            for k in fkeys
+        ],
     }
     raw = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     dest = out_dir / "usados.json.gz"
@@ -472,6 +560,7 @@ def procesar_transferencias(entradas, out_dir: Path):
           f"{g_n.sum():,.0f} vehículos, {dest.stat().st_size / 1e6:.1f} MB.")
     if years:
         print(f"  Inscripción inicial vista: {years[0]} a {years[-1]}.")
+    print(f"  Provincia sin reconocer: {g_unk:,.0f} vehículos.")
 
 
 def main():

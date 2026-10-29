@@ -24,8 +24,8 @@ const NOPASS = /CAMION|SEMIRREMOLQUE|REMOLQUE|ACOPLADO|TRACTOR|CHASIS|CARRETON|B
 const SINDATO = /^SIN (ESPECIFICACION|MARCA|DATO)/;
 
 /* ---------- estado ---------- */
-const st = { period: '', months: [], origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, q: '', ifam: -1, upre: -1, token: 0 };
-let IX = null, CFG = { grupos: [], serie: [] }, U = null, uPick = -1;
+const st = { period: '', months: [], origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, ev: -1, q: '', ifam: -1, upre: -1, followModel: false, token: 0 };
+let IX = null, CFG = { grupos: [], serie: [] }, U = null, uPick = -1, MAPA = null;
 let sel = [], selP = [];
 const MD = new Map();
 const G = {
@@ -139,8 +139,9 @@ function buildSel(months, filt) {
       if (!oOn[M.o[i]]) continue;
       if (st.brand >= 0 && M.b[i] !== st.brand) continue;
       if (st.tipo >= 0 && M.t[i] !== st.tipo) continue;
-      if (st.prov >= 0 && M.p[i] !== st.prov) continue;
+      if (st.prov >= 0 && provKey(G.prov[M.p[i]]) !== provKey(G.prov[st.prov])) continue;
       if (st.pe >= 0 && M.pe[i] !== st.pe) continue;
+      if (st.ev >= 0 && G.verEv[M.v[i]] !== st.ev) continue;
       if (st.era !== 'all') {
         const a = Y - M.y[i];
         if (st.era === 'new' && a > 1) continue;
@@ -317,7 +318,9 @@ function refreshOptions() {
   const b = tally(selP, 'b', G.marca.length), t = tally(selP, 't', G.tipo.length), p = tally(selP, 'p', G.prov.length), o = tally(selP, 'o', G.orig.length);
   st.brand = fillSel('#f-brand', 'Todas las marcas', ranked(b).map(([i, v]) => [i, `${tc(G.marca[i])} (${f0(v)})`]), st.brand);
   st.tipo = fillSel('#f-tipo', 'Todas las carrocerías', ranked(t).map(([i, v]) => [i, `${tc(G.tipo[i])} (${f0(v)})`]), st.tipo);
-  st.prov = fillSel('#f-prov', 'Todas las provincias', ranked(p).map(([i, v]) => [i, `${G.prov[i]} (${f0(v)})`]), st.prov);
+  const mp = mergeProv(p);
+  if (st.prov >= 0) { const row = mp.find(r => r.k === provKey(G.prov[st.prov])); st.prov = row ? row.i : -1; }
+  st.prov = fillSel('#f-prov', 'Todas las provincias', mp.map(r => [r.i, `${provNice(r.k, G.prov[r.i])} (${f0(r.v)})`]), st.prov);
   const ec = { all: 0, new: 0, old: 0, classic: 0 };
   for (const { M, idx } of selP) for (let k = 0; k < idx.length; k++) {
     const i = idx[k], w = M.w[i] / 100, a = M.year - M.y[i];
@@ -344,10 +347,39 @@ $('#f-prov').onchange = e => { st.prov = +e.target.value; update(); };
 $('#f-pers').onchange = e => { st.pe = +e.target.value; update(); };
 $('#f-q').oninput = e => { st.q = e.target.value.trim(); update(); };
 $('#reset').onclick = () => {
-  Object.assign(st, { origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, q: '' });
+  Object.assign(st, { origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, ev: -1, q: '' });
   $('#f-pers').value = '-1'; $('#f-q').value = ''; refreshOptions(); update();
 };
 const toggle = (k, v, id) => { st[k] = st[k] === v ? -1 : v; $(id).value = st[k]; update(); };
+
+function provKey(s) {
+  const n = norm(s).replace(/\./g, '').replace(/\s+/g, ' ').trim();
+  if (n.includes('autonoma') || n === 'caba' || n.includes('capital federal')) return 'caba';
+  if (n.startsWith('tierra del fuego')) return 'tierra del fuego';
+  return n;
+}
+function provNice(k, fallback) {
+  if (MAPA) { const it = MAPA.items.find(x => x.k === k); if (it) return it.n; }
+  return fallback || k;
+}
+function mergeProv(vals) {
+  const acc = [], at = new Map();
+  for (let i = 0; i < vals.length; i++) {
+    if (!(vals[i] > 0)) continue;
+    const k = provKey(G.prov[i]);
+    let row = at.get(k);
+    if (!row) { row = { i, v: 0, k, top: 0 }; at.set(k, row); acc.push(row); }
+    row.v += vals[i];
+    if (vals[i] >= row.top) { row.top = vals[i]; row.i = i; }
+  }
+  acc.sort((a, b) => b.v - a.v);
+  return acc;
+}
+function provPick(key) {
+  const row = mergeProv(tally(selP, 'p', G.prov.length)).find(r => r.k === key);
+  if (!row) return;
+  toggle('prov', row.i, '#f-prov');
+}
 
 /* ---------- buscador de modelos ---------- */
 function suggest(q) {
@@ -374,12 +406,12 @@ function suggest(q) {
   }).concat(extra.map(i => `<button type="button" class="chip" data-u="${i}" aria-pressed="${i === st.upre}">${esc(uFamLabel(i))}<span class="c num">antes de 2018: ${f0(U.pre[i])}</span></button>`));
   $('#sugg').innerHTML = chips.length ? chips.join('') : '<span class="note">No encontré ese modelo. Probá con una parte del nombre.</span>';
   $('#sugg').querySelectorAll('.chip').forEach(c => {
-    c.onclick = () => c.dataset.u !== undefined ? showPre(+c.dataset.u) : showFam(+c.dataset.f);
+    c.onclick = () => { st.followModel = true; c.dataset.u !== undefined ? showPre(+c.dataset.u) : showFam(+c.dataset.f); };
   });
   return { list, extra };
 }
 $('#q').oninput = e => suggest(e.target.value);
-$('#q').onkeydown = e => { if (e.key === 'Enter') { const l = suggest(e.target.value); if (l.list.length) showFam(l.list[0]); else if (l.extra.length) showPre(l.extra[0]); } };
+$('#q').onkeydown = e => { if (e.key === 'Enter') { const l = suggest(e.target.value); st.followModel = true; if (l.list.length) showFam(l.list[0]); else if (l.extra.length) showPre(l.extra[0]); else st.followModel = false; } };
 
 function preSeries(i) {
   const cats = [], vals = [];
@@ -409,7 +441,18 @@ function preBlock(i) {
   return `<h3 style="margin-top:18px">Antes de 2018</h3>
     <div class="kv"><span><b>${f0(s.total)}</b> se habían patentado entre ${s.y0} y ${s.y1}</span><span>visto porque se transfirieron entre ${mLabel(U.months[0])} y ${mLabel(U.months[U.months.length - 1])}</span></div>
     <div id="f-pre" style="margin-top:8px"></div>
-    <p class="note">Cada barra es la fecha de inscripción inicial de autos de este modelo que después cambiaron de dueño. No es el total patentado ese año: el que nunca se transfirió en ese período no aparece, y uno transferido dos veces cuenta dos.</p>`;
+    ${preVersionsHTML(i)}
+    <p class="note">Cada barra es la fecha de inscripción inicial de autos de este modelo que después cambiaron de dueño. No es el total patentado ese año: el que nunca se transfirió en ese período no aparece, y uno transferido dos veces cuenta dos. Las versiones son el nombre completo. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
+}
+function preVersionsHTML(i) {
+  const rows = U && U.fv && i !== undefined && i >= 0 ? U.fv[i] : null;
+  if (!rows || !rows.length) return '';
+  return `<h3 style="margin-top:14px">Versiones</h3><div class="bars" id="f-pre-ver"></div>`;
+}
+function drawPreVersions(i) {
+  const el = $('#f-pre-ver');
+  if (!el || !U || !U.fv || i === undefined || i < 0) return;
+  bars(el, (U.fv[i] || []).slice(0, 8).map(([name, v]) => ({ label: tc(name), v, tip: `${tc(name)}: ${f0(v)}` })));
 }
 function markChips() {
   document.querySelectorAll('#sugg .chip').forEach(c => {
@@ -424,9 +467,13 @@ function showPre(i) {
       <div><div class="n num">${f0(s.total)}</div><div class="l">patentados antes de 2018 y transferidos después</div></div>
       <div><div class="n num">${s.y0 || '–'}</div><div class="l">${s.y0 ? 'inscripción más antigua vista' + (s.y1 && s.y1 !== s.y0 ? ', hasta ' + s.y1 : '') : 'sin fecha anterior a 2018'}</div></div></div>
     <div id="f-pre"></div>
-    <p class="note">Este nombre no aparece en los patentamientos mensuales, o está escrito distinto. Las barras salen de la fecha de inscripción inicial en las transferencias de ${mLabel(U.months[0])} a ${mLabel(U.months[U.months.length - 1])}. No es el padrón completo de esos años.</p>`;
+    ${preVersionsHTML(i)}
+    <p class="note">Este nombre no aparece en los patentamientos mensuales, o está escrito distinto. Las barras salen de la fecha de inscripción inicial en las transferencias de ${mLabel(U.months[0])} a ${mLabel(U.months[U.months.length - 1])}. No es el padrón completo de esos años. Las versiones son el nombre completo. De estos no hay provincia del primer patentamiento ni género del primer dueño.</p>`;
   drawPre($('#f-pre'), i);
+  drawPreVersions(i);
   markChips();
+  renderMapa();
+  renderMapaUsados();
 }
 function showFam(ifam) {
   st.ifam = ifam;
@@ -450,7 +497,7 @@ function showFam(ifam) {
   let detail = '', after = null, y0 = 9999, y1 = 0;
   const hasRows = rows.length > 0;
   if (hasRows) {
-    const ve = ranked(tally(rows, 'v', G.ver.length), 8), oc = ranked(tally(rows, 'o', G.orig.length)), pv = ranked(tally(rows, 'p', G.prov.length), 5), ty = ranked(tally(rows, 't', G.tipo.length), 3);
+    const ve = ranked(tally(rows, 'v', G.ver.length), 8), oc = ranked(tally(rows, 'o', G.orig.length)), pv = mergeProv(tally(rows, 'p', G.prov.length)).slice(0, 5), ty = ranked(tally(rows, 't', G.tipo.length), 3);
     const yc = {};
     rows.forEach(({ M, idx }) => { for (let k = 0; k < idx.length; k++) { const i = idx[k], y = M.y[i]; yc[y] = (yc[y] || 0) + M.w[i] / 100; y0 = Math.min(y0, y); y1 = Math.max(y1, y); } });
     const ys = Object.keys(yc).sort();
@@ -461,7 +508,7 @@ function showFam(ifam) {
     <div style="margin-top:18px" id="fo">${ownersHTML(ownerStats(rows), 10)}</div>`;
     after = () => {
       bars($('#fv'), ve.map(([i, c]) => ({ label: tc(G.verTxt[i]), v: c, tip: `${verLabel(i)}: ${f0(c)}` })));
-      bars($('#fp'), pv.map(([i, c]) => ({ label: G.prov[i], v: c })));
+      bars($('#fp'), pv.map(r => ({ label: provNice(r.k, G.prov[r.i]), v: r.v })));
       fillOwners($('#fo'), ownerStats(rows));
     };
   } else {
@@ -488,8 +535,10 @@ function showFam(ifam) {
     tick: tickFn, pick: i => { if (IX.months[i].file) setPeriod('m:' + IX.months[i].m); },
   });
   const ui = U ? U.famM.get(brand + '|' + fname) : undefined;
-  if (ui !== undefined) drawPre($('#f-pre'), ui);
+  if (ui !== undefined) { drawPre($('#f-pre'), ui); drawPreVersions(ui); }
   markChips();
+  renderMapa();
+  renderMapaUsados();
 }
 function tickFn(i) {
   const n = IX.months.length, m = IX.months[i].m;
@@ -520,8 +569,9 @@ function renderHint() {
   if (st.era !== 'all') p.push($('#f-era').selectedOptions[0].textContent.replace(/ \([^)]*\)$/, ''));
   if (st.brand >= 0) p.push(tc(G.marca[st.brand]));
   if (st.tipo >= 0) p.push(tc(G.tipo[st.tipo]));
-  if (st.prov >= 0) p.push(G.prov[st.prov]);
+  if (st.prov >= 0) p.push(provNice(provKey(G.prov[st.prov]), G.prov[st.prov]));
   if (st.pe >= 0) p.push(st.pe ? 'solo empresas' : 'solo personas');
+  if (st.ev >= 0) p.push(EV_LABEL[st.ev]);
   if (st.q) p.push('modelo con “' + st.q + '”');
   $('#sel-hint').textContent = p.join(' · ');
 }
@@ -572,9 +622,9 @@ function renderListas() {
   bars($('#marcas'), ranked(tally(sel, 'b', G.marca.length), 12).map(([i, v]) => ({ label: tc(G.marca[i]), v, tip: `${tc(G.marca[i])}: ${f0(v)} (${pc(v / tot)})`, click: () => toggle('brand', i, '#f-brand'), on: st.brand === i })));
   bars($('#modelos'), ranked(tally(sel, 'f', G.fam.length), 12).map(([f, v]) => ({
     label: famLabel(f), v, tip: `${famLabel(f)}: ${f0(v)} (${pc(v / tot)}). Tocá para ver su historia`,
-    click: () => { const k = IX.famKey.get(G.marca[G.famBrand[f]] + '|' + G.famName[f]); if (k !== undefined) { showFam(k); $('#buscador').scrollIntoView({ behavior: 'smooth' }); } },
+    click: () => { const k = IX.famKey.get(G.marca[G.famBrand[f]] + '|' + G.famName[f]); if (k !== undefined) { st.followModel = true; showFam(k); $('#buscador').scrollIntoView({ behavior: 'smooth' }); } },
   })));
-  bars($('#provs'), ranked(tally(sel, 'p', G.prov.length), 12).map(([i, v]) => ({ label: G.prov[i], v, tip: `${G.prov[i]}: ${f0(v)} (${pc(v / tot)})`, click: () => toggle('prov', i, '#f-prov'), on: st.prov === i })));
+  bars($('#provs'), mergeProv(tally(sel, 'p', G.prov.length)).slice(0, 12).map(r => ({ label: provNice(r.k, G.prov[r.i]), v: r.v, tip: `${provNice(r.k, G.prov[r.i])}: ${f0(r.v)} (${pc(r.v / tot)})`, click: () => provPick(r.k), on: st.prov >= 0 && provKey(G.prov[st.prov]) === r.k })));
   const os = ownerStats(sel), el = $('#titulares'); el.innerHTML = ownersHTML(os, 10); fillOwners(el, os);
 }
 
@@ -660,20 +710,38 @@ function renderClasicos() {
 $('#c-edad').onchange = renderClasicos;
 
 /* ---------- híbridos y eléctricos ---------- */
+function toggleEv(i) {
+  st.ev = st.ev === i ? -1 : i;
+  update();
+}
 function renderElectricos() {
+  let open = sel;
+  if (st.ev >= 0) {
+    const prev = st.ev;
+    st.ev = -1;
+    try { open = buildSel(st.months, true); }
+    finally { st.ev = prev; }
+  }
   const cat = new Float64Array(5), fc = new Float64Array(G.fam.length);
+  for (const { M, idx } of open) for (let k = 0; k < idx.length; k++) {
+    const i = idx[k], c = G.verEv[M.v[i]], w = M.w[i] / 100; cat[c] += w;
+  }
   for (const { M, idx } of sel) for (let k = 0; k < idx.length; k++) {
-    const i = idx[k], c = G.verEv[M.v[i]], w = M.w[i] / 100; cat[c] += w; if (c > 0) fc[M.f[i]] += w;
+    const i = idx[k], c = G.verEv[M.v[i]]; if (c > 0 || c === st.ev) fc[M.f[i]] += M.w[i] / 100;
   }
   const tot = cat.reduce((a, b) => a + b, 0), ele = tot - cat[0];
   const col = ['var(--s4)', 'var(--s3)', 'var(--s1)', 'var(--s2)', 'var(--ink)'];
-  $('#e-sum').innerHTML = tot ? `<div class="lead"><b>${pc(ele / tot)}</b> de la selección (${f0(ele)} de ${f0(tot)} vehículos) tiene algún grado de electrificación.</div>
-    <div class="stack">${Array.from(cat, (v, i) => v ? `<i style="flex:${v};background:${col[i]}" data-tip="${EV_LABEL[i]}: ${f0(v)} (${pc(v / tot)})"></i>` : '').join('')}</div>
-    <div class="legend row-legend">${Array.from(cat, (v, i) => `<div><span class="sw" style="background:${col[i]}"></span>${EV_LABEL[i]}<span class="nn num">${f0(v)}</span></div>`).join('')}</div>` : '<div class="vacio">No hay datos con la selección actual.</div>';
+  const stack = Array.from(cat, (v, i) => v ? `<button type="button" class="seg${st.ev === i ? ' on' : ''}" style="flex:${v};background:${col[i]}" data-tip="${EV_LABEL[i]}: ${f0(v)} (${pc(v / tot)})" aria-label="${esc(EV_LABEL[i])}" aria-pressed="${st.ev === i}" data-ev="${i}"></button>` : '').join('');
+  const legend = Array.from(cat, (v, i) => `<button type="button" class="legbtn${st.ev === i ? ' on' : ''}" data-ev="${i}" aria-pressed="${st.ev === i}"><span class="sw" style="background:${col[i]}"></span>${EV_LABEL[i]}<span class="nn num">${f0(v)}</span></button>`).join('');
+  const lead = !tot ? '' : st.ev >= 0
+    ? `<div class="lead">Filtro activo: <b>${EV_LABEL[st.ev]}</b>. El resto de la página muestra solo esos. Tocá de nuevo para ver todos.</div>`
+    : `<div class="lead"><b>${pc(ele / tot)}</b> de la selección (${f0(ele)} de ${f0(tot)} vehículos) tiene algún grado de electrificación.</div>`;
+  $('#e-sum').innerHTML = tot ? `${lead}<div class="stack">${stack}</div><div class="legend row-legend">${legend}</div>` : '<div class="vacio">No hay datos con la selección actual.</div>';
+  $('#e-sum').querySelectorAll('[data-ev]').forEach(b => { b.onclick = () => toggleEv(+b.dataset.ev); });
   const top = ranked(fc, 10), set = new Map(top.map(([f]) => [f, new Float64Array(5)]));
   for (const { M, idx } of sel) for (let k = 0; k < idx.length; k++) { const i = idx[k], a = set.get(M.f[i]); if (a) a[G.verEv[M.v[i]]] += M.w[i] / 100; }
   bars($('#e-top'), top.map(([f, v]) => {
-    const a = set.get(f), parts = [...a].map((x, i) => x > 0 && i > 0 ? EV_LABEL[i] + ' ' + f0(x) : '').filter(Boolean).join(', ');
+    const a = set.get(f), parts = [...a].map((x, i) => x > 0 && (i > 0 || st.ev === 0) ? EV_LABEL[i] + ' ' + f0(x) : '').filter(Boolean).join(', ');
     return { label: famLabel(f), v, tip: `${famLabel(f)}: ${parts}` };
   }));
 }
@@ -697,6 +765,7 @@ function uFamLabel(i) {
 }
 function pickUsado(i) {
   uPick = uPick === i ? -1 : i;
+  if (uPick >= 0) st.followModel = true;
   renderUsados();
   if (uPick < 0) return;
   const f = U.fams[i], key = U.brands[f[0]] + '|' + f[1];
@@ -717,6 +786,7 @@ async function loadUsados() {
     console.error(e);
   }
   renderUsados();
+  renderMapaUsados();
   if ($('#q')) suggest($('#q').value);
   if (U && st.ifam >= 0) showFam(st.ifam);
   else if (U && st.upre >= 0) showPre(st.upre);
@@ -817,22 +887,141 @@ function renderUsados() {
   }
 }
 
+/* ---------- mapas ---------- */
+function mapSel() {
+  if (!st.followModel || st.ifam < 0 || !IX) return sel;
+  const f = IX.fams[st.ifam], sb = G.marcaM.get(IX.brands[f[0]]);
+  const sf = sb === undefined ? undefined : G.famM.get(sb + '|' + f[1]);
+  if (sf === undefined) return [];
+  return sel.map(({ M, idx }) => {
+    const out = new Int32Array(idx.length); let c = 0;
+    for (let k = 0; k < idx.length; k++) if (M.f[idx[k]] === sf) out[c++] = idx[k];
+    return { M, idx: out.subarray(0, c) };
+  });
+}
+function countsByMap(rawByKey) {
+  const out = new Float64Array(MAPA.items.length);
+  MAPA.items.forEach((it, i) => { out[i] = rawByKey.get(it.k) || 0; });
+  return out;
+}
+function inscriptionCounts() {
+  const raw = tally(mapSel(), 'p', G.prov.length), by = new Map();
+  for (let i = 0; i < raw.length; i++) {
+    if (!(raw[i] > 0)) continue;
+    const k = provKey(G.prov[i]);
+    by.set(k, (by.get(k) || 0) + raw[i]);
+  }
+  return countsByMap(by);
+}
+function usadoDeLaSeleccion() {
+  if (!U || !st.followModel) return -1;
+  if (st.ifam >= 0) {
+    const f = IX.fams[st.ifam];
+    const i = U.famM.get(IX.brands[f[0]] + '|' + f[1]);
+    if (i !== undefined) return i;
+  }
+  if (st.upre >= 0) return st.upre;
+  if (uPick >= 0) return uPick;
+  return -1;
+}
+function transferCounts() {
+  const by = new Map();
+  const ui = usadoDeLaSeleccion();
+  if (ui >= 0 && U.fp && U.pk) {
+    (U.fp[ui] || []).forEach(pair => {
+      const k = U.pk[pair[0]];
+      by.set(k, (by.get(k) || 0) + pair[1]);
+    });
+    return { counts: countsByMap(by), modelo: true };
+  }
+  const ids = transferIds();
+  if (U.ps && U.pk) U.pk.forEach((k, p) => { const v = sumAt(U.ps[p], ids); if (v) by.set(k, v); });
+  return { counts: countsByMap(by), modelo: false };
+}
+function paintMap(el, barEl, capEl, counts, label) {
+  if (!el) return;
+  const onKey = st.prov >= 0 ? provKey(G.prov[st.prov]) : '';
+  if (!MAPA) {
+    el.innerHTML = '<p class="note">El mapa no está cargado.</p>';
+    if (barEl) barEl.innerHTML = '';
+    if (capEl) capEl.textContent = '';
+    return;
+  }
+  let max = 0, total = 0, best = '';
+  counts.forEach((v, i) => { total += v; if (v > max) { max = v; best = MAPA.items[i].n; } });
+  el.innerHTML = `<svg viewBox="0 0 ${MAPA.w} ${MAPA.h}" role="img" aria-label="${esc(label)}">` + MAPA.items.map((it, i) => {
+    const v = counts[i] || 0;
+    const t = max ? Math.sqrt(v / max) : 0;
+    const op = v ? (0.16 + 0.84 * t).toFixed(3) : '0.08';
+    return `<path d="${it.d}" fill-opacity="${op}"${onKey === it.k ? ' class="on"' : ''} data-k="${it.k}" tabindex="0" role="button" aria-label="${esc(it.n)}" data-tip="${esc(it.n + ': ' + f0(v) + (total ? ' (' + pc(v / total) + ')' : ''))}"/>`;
+  }).join('') + '</svg>';
+  el.querySelectorAll('path').forEach(p => {
+    const go = () => provPick(p.dataset.k);
+    p.onclick = go;
+    p.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+  });
+  if (barEl) {
+    const items = MAPA.items.map((it, i) => ({ it, v: counts[i] || 0 })).filter(x => x.v > 0).sort((a, b) => b.v - a.v).slice(0, 8);
+    bars(barEl, items.map(x => ({
+      label: x.it.n, v: x.v, tip: `${x.it.n}: ${f0(x.v)} (${total ? pc(x.v / total) : '–'})`,
+      click: () => provPick(x.it.k), on: onKey === x.it.k,
+    })));
+  }
+  if (capEl) capEl.textContent = total ? `Donde más: ${best}, ${f0(max)}.` : 'No hay datos con la selección actual.';
+}
+function renderMapa() {
+  const el = $('#mapa');
+  if (!el || !st.months.length) return;
+  const counts = MAPA ? inscriptionCounts() : null;
+  const quien = st.followModel && st.ifam >= 0 ? famLabelFromIndex(st.ifam) : '';
+  paintMap(el, $('#mapa-bars'), $('#mapa-cap'), counts || [], quien ? 'Dónde se patenta ' + quien : 'Dónde se patentan los vehículos de la selección');
+  const cap = $('#mapa-cap');
+  if (cap && quien && cap.textContent && !cap.textContent.startsWith('No hay')) cap.textContent = quien + '. ' + cap.textContent;
+}
+function famLabelFromIndex(i) {
+  const f = IX.fams[i];
+  return tc(IX.brands[f[0]]) + ' ' + tc(f[1]);
+}
+function renderMapaUsados() {
+  const el = $('#u-mapa'), note = $('#u-mapa-note');
+  if (!el) return;
+  if (!U || !MAPA || !U.pk) {
+    if (U && !U.pk) {
+      el.innerHTML = '';
+      if (note) note.textContent = 'El mapa de transferencias aparece cuando se vuelve a armar el archivo de usados.';
+    }
+    return;
+  }
+  const pack = transferCounts();
+  const ui = usadoDeLaSeleccion();
+  const quien = ui >= 0 ? uFamLabel(ui) : '';
+  paintMap(el, $('#u-mapa-bars'), $('#u-mapa-cap'), pack.counts, quien ? 'Dónde se transfiere ' + quien : 'Dónde se transfieren los vehículos del período');
+  const cap = $('#u-mapa-cap');
+  if (cap && quien && cap.textContent && !cap.textContent.startsWith('No hay')) cap.textContent = quien + '. ' + cap.textContent;
+  if (note) {
+    note.textContent = pack.modelo
+      ? `Todas las transferencias cargadas de este modelo, de ${mLabel(U.months[0])} a ${mLabel(U.months[U.months.length - 1])}, no solo el período de arriba. Tocar una provincia filtra los patentamientos.`
+      : 'Transferencias del período elegido. Si elegís un modelo, el mapa pasa a mostrar ese modelo en todas las transferencias cargadas. Tocar una provincia filtra los patentamientos.';
+  }
+}
+
 /* ---------- ciclo principal ---------- */
 function update() {
   sel = buildSel(st.months, true);
   renderHint(); renderStats(); renderTiempo(); renderOrigen(); renderListas(); renderRaros(); renderExoticos(); renderClasicos(); renderElectricos();
-  renderEvo(); renderUsados();
+  renderEvo(); renderUsados(); renderMapa(); renderMapaUsados();
 }
 let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (IX && st.months.length) { renderTiempo(); renderEvo(); renderExoticos(); renderUsados(); if (st.ifam >= 0) showFam(st.ifam); } }, 150); });
 
 /* ---------- arranque ---------- */
 async function init() {
   try {
-    const [ix, cfg] = await Promise.all([
+    const [ix, cfg, mapa] = await Promise.all([
       fetch('data/index.json').then(r => { if (!r.ok) throw new Error('index ' + r.status); return r.json(); }),
       fetch('data/exoticos.json').then(r => r.ok ? r.json() : { grupos: [], serie: [] }).catch(() => ({ grupos: [], serie: [] })),
+      fetch('data/mapa.json').then(r => r.ok ? r.json() : null).catch(() => null),
     ]);
-    IX = ix; CFG = cfg;
+    IX = ix; CFG = cfg; MAPA = mapa;
   } catch (e) {
     $('#cobertura').textContent = 'Todavía no hay datos cargados. Corré tools/build.py con los CSV (ver README).';
     console.error(e); return;

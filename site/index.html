@@ -87,6 +87,20 @@
       </div>
     </section>
 
+    <section id="mapa-ins" aria-labelledby="h-mapa">
+      <div class="sec-h"><h2 id="h-mapa">Dónde se patentan</h2><span class="hint">Tocá una provincia para filtrar</span></div>
+      <div class="panel">
+        <div class="mapa-wrap">
+          <div id="mapa" class="mapa"></div>
+          <div>
+            <p class="lead" id="mapa-cap"></p>
+            <div id="mapa-bars" class="bars"></div>
+            <p class="note">Inscripciones iniciales desde 2018. El color sigue el período, los filtros y, si elegiste uno, el modelo del buscador. Más oscuro es donde hay más patentamientos.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="raros" aria-labelledby="h-raros">
       <div class="sec-h"><h2 id="h-raros">Los más raros</h2><span class="hint">Modelos con pocas unidades dentro de la selección</span></div>
       <div class="panel">
@@ -133,7 +147,7 @@
     </section>
 
     <section id="electricos" aria-labelledby="h-ev">
-      <div class="sec-h"><h2 id="h-ev">Híbridos y eléctricos</h2><span class="hint">Estimado a partir del nombre del modelo</span></div>
+      <div class="sec-h"><h2 id="h-ev">Híbridos y eléctricos</h2><span class="hint">Tocá un color para filtrar</span></div>
       <div class="panel">
         <div id="e-sum"></div>
         <h3 style="margin-top:14px">Modelos electrificados más patentados</h3><div id="e-top" class="bars"></div>
@@ -161,6 +175,15 @@
         </div>
         <h3 style="margin-top:16px">Hacia un comerciante habitual</h3>
         <div id="u-hacia" class="bars"></div>
+        <h3 style="margin-top:16px">Dónde se transfieren <span class="hint">tocá una provincia para filtrar los patentamientos</span></h3>
+        <div class="mapa-wrap">
+          <div id="u-mapa" class="mapa"></div>
+          <div>
+            <p class="lead" id="u-mapa-cap"></p>
+            <div id="u-mapa-bars" class="bars"></div>
+            <p class="note" id="u-mapa-note"></p>
+          </div>
+        </div>
         <h3 style="margin-top:16px">Cuándo se habían patentado</h3>
         <div id="u-anio"></div>
         <div class="legend row-legend" id="u-anio-leg"></div>

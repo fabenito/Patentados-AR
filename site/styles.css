@@ -93,9 +93,19 @@ button.brow:hover{background:var(--wash)}
 .more{font-size:13px;color:var(--mute);padding:6px}
 
 .stack{display:flex;gap:2px;height:30px;margin:6px 0 10px}
-.stack i{display:block;border-radius:4px;min-width:3px}
+.stack i,.stack button.seg{display:block;border-radius:4px;min-width:4px;height:100%}
+.stack button.seg{border:0;padding:0;cursor:pointer}
+.stack button.seg.on{outline:2px solid var(--ink);outline-offset:2px}
 .legend{display:flex;flex-direction:column;gap:6px;font-size:14px}
-.legend div{display:flex;align-items:center;gap:8px}
+.legend div,button.legbtn{display:flex;align-items:center;gap:8px}
+button.legbtn{width:100%;background:none;border:0;border-radius:6px;padding:3px 6px;cursor:pointer;color:inherit;text-align:left}
+button.legbtn:hover,button.legbtn.on{background:var(--wash)}
+.legend.row-legend button.legbtn{width:auto}
+.mapa-wrap{display:grid;grid-template-columns:minmax(200px,380px) minmax(0,1fr);gap:8px 22px;align-items:start}
+.mapa svg{display:block;width:100%;height:auto;max-width:420px;margin:0 auto}
+.mapa path{fill:var(--s1);stroke:var(--bg);stroke-width:1.25px;vector-effect:non-scaling-stroke;cursor:pointer}
+.mapa path.on,.mapa path:hover{stroke:var(--ink);stroke-width:2.25px}
+@media (max-width:760px){.mapa-wrap{grid-template-columns:1fr}}
 .legend .sw{width:12px;height:12px;border-radius:3px;flex:none}
 .legend .nn{margin-left:auto;color:var(--ink2)}
 .legend.row-legend{flex-direction:row;flex-wrap:wrap;gap:6px 18px;margin-top:8px;font-size:13px;color:var(--ink2)}

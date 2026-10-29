@@ -1,4 +1,5 @@
 raw/*.csv
+tools/mapa.geojson
 __pycache__/
 *.pyc
 .venv/

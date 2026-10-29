@@ -31,6 +31,9 @@ DEFAULT_OUT = ROOT / "site" / "data"
 ORIGENES = ["Nacional", "Importado", "Protocolo 21"]
 TRAMITES = ["Nacional", "Importado", "Por dictamen u oficio", "Formulario 05", "Auto clásico"]
 TWO_WORD = {"GRAND", "RANGE", "LAND", "SANTA", "CLASE", "MODEL", "SERIE", "NEW", "SUPER", "ALL"}
+# El token que sigue es la línea, no una versión: RS Q8 -> RSQ8, M 3 -> M3.
+# C 200 o GLC 300 se quedan en la primera palabra y las versiones se listan aparte.
+LINEA = {"RS", "SQ", "M", "X", "Q", "Z", "TT"}
 EDAD_CORTES = [24, 34, 44, 54, 64]
 
 # Columnas que el sitio necesita. Si falta alguna opcional se usa un valor neutro.
@@ -68,6 +71,10 @@ def familia(modelo: str) -> str:
         return modelo
     if t[0] in TWO_WORD and len(t) > 1:
         return t[0] + " " + t[1]
+    if len(t) > 1 and t[0] in LINEA and (
+        re.fullmatch(r"[A-Z]{1,2}\d{1,2}[A-Z]?", t[1]) or re.fullmatch(r"\d{1,2}", t[1])
+    ):
+        return t[0] + t[1]
     return t[0]
 
 

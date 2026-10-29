@@ -17,7 +17,7 @@
   <header class="mast">
     <div class="plate" aria-label="Patentados AR"><div class="band">ARGENTINA</div><div class="nm">Patentados</div></div>
     <div>
-      <p>Todo lo que se patentó por primera vez en Argentina, mes a mes: 0 km, importados, clásicos, camiones y acoplados. Buscá un modelo, elegí el período y mirá qué tan raro es lo que te gusta.</p>
+      <p>Todo lo que se patentó por primera vez en Argentina, mes a mes: 0 km, importados, clásicos, camiones y acoplados. Buscá un modelo, elegí el período y mirá qué tan raro es lo que te gusta. Más abajo están las transferencias: qué se reventa y, de esos usados, cuándo se habían patentado.</p>
       <p class="src" id="cobertura">Cargando datos…</p>
     </div>
   </header>
@@ -38,7 +38,7 @@
   </div>
 
   <section id="buscador" aria-labelledby="h-buscador">
-    <div class="sec-h"><h2 id="h-buscador">¿Cuántos se patentaron de este modelo?</h2><span class="hint">Cuenta todos los meses cargados. El detalle usa el período de arriba y no los otros filtros.</span></div>
+    <div class="sec-h"><h2 id="h-buscador">¿Cuántos se patentaron de este modelo?</h2><span class="hint">Los meses desde 2018 son el padrón oficial. Antes de eso, el gráfico naranja sale de las transferencias.</span></div>
     <div class="panel">
       <div class="finder-top">
         <input id="q" type="search" placeholder="Escribí un modelo: Hilux, Mustang, Corvette, Amarok, 911…" autocomplete="off" aria-label="Buscar un modelo">
@@ -140,10 +140,38 @@
         <p class="note">El registro no informa el tipo de motor. Se detecta por palabras como HEV, PHEV, híbrido o eléctrico en el nombre, y todo lo de BYD se cuenta como electrificado. Puede quedar algún modelo sin detectar.</p>
       </div>
     </section>
+
+    <section id="usados" aria-labelledby="h-usados">
+      <div class="sec-h"><h2 id="h-usados">Usados y transferencias</h2><span class="hint">Autos que cambiaron de dueño</span></div>
+      <div class="panel">
+        <div class="stats" id="u-stats"></div>
+        <h3 style="margin-top:14px">Transferencias por mes <span class="hint">según el período de arriba</span></h3>
+        <div id="u-mes"></div>
+        <div class="grid" style="margin-top:16px">
+          <div><h3>Marcas más transferidas <span class="hint">tocá para filtrar</span></h3><div id="u-marcas" class="bars"></div></div>
+          <div><h3>Modelos más transferidos <span class="hint">tocá para buscar</span></h3><div id="u-modelos" class="bars"></div></div>
+        </div>
+        <div class="grid" style="margin-top:16px">
+          <div><h3>Primer dueño</h3><div id="u-dueno"></div></div>
+          <div><h3>Tipo de trámite</h3><div id="u-flujo"></div></div>
+        </div>
+        <div class="grid" style="margin-top:16px">
+          <div><h3>Patentados a una empresa y luego transferidos</h3><div id="u-empresa" class="bars"></div></div>
+          <div><h3>Salidos de un comerciante habitual</h3><div id="u-desde" class="bars"></div></div>
+        </div>
+        <h3 style="margin-top:16px">Hacia un comerciante habitual</h3>
+        <div id="u-hacia" class="bars"></div>
+        <h3 style="margin-top:16px">Cuándo se habían patentado</h3>
+        <div id="u-anio"></div>
+        <div class="legend row-legend" id="u-anio-leg"></div>
+        <div id="u-det"></div>
+        <p class="note">Cada fila pesa por su porcentaje de titularidad, igual que arriba. Un auto transferido dos veces cuenta dos veces: no hay dominio para reconocerlo. El titular del archivo es el primer dueño, el del patentamiento original, no quien compró el usado. «Hacia un comerciante habitual» y «desde un comerciante habitual» salen del tipo de trámite. El gráfico de años usa la fecha de inscripción inicial de esos usados. No es el total patentado ese año: antes de 2018 este sitio no tiene el padrón completo, y solo entran los autos que después aparecen en una transferencia del período.</p>
+      </div>
+    </section>
   </main>
 
   <footer>
-    <p>Los números son vehículos, no filas del archivo. Un auto con dos titulares aparece en dos filas, así que cada fila se pesa por su porcentaje de titularidad. Son patentamientos iniciales: autos que se registraron por primera vez en ese mes. No es el parque automotor total, y un auto patentado antes del primer mes cargado no entra. Los precios de Mercado Libre que ves al tocar un enlace son los de hoy, no los del mes en que se patentó. Fuente: DNRPA, datos abiertos. Este sitio no está afiliado al DNRPA ni a Mercado Libre.</p>
+    <p>Los números son vehículos, no filas del archivo. Un auto con dos titulares aparece en dos filas, así que cada fila se pesa por su porcentaje de titularidad. Son patentamientos iniciales: autos que se registraron por primera vez en ese mes. No es el parque automotor total, y un auto patentado antes del primer mes cargado no entra. Los precios de Mercado Libre que ves al tocar un enlace son los de hoy, no los del mes en que se patentó. Fuente: DNRPA, datos abiertos. Las transferencias son otro archivo y no se suman a los patentamientos de arriba. Este sitio no está afiliado al DNRPA ni a Mercado Libre.</p>
   </footer>
 </div>
 <div id="tip" role="tooltip"></div>

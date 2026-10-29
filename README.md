@@ -20,6 +20,12 @@ render.yaml      Render blueprint (static site, publishes ./site)
 3. `python tools/build.py add raw/*.csv`   (any number of files; re-running a month replaces it)
 4. `git add site/data && git commit -m "Add 2026-10" && git push`
 
+Transferencias (usados) viven en otra carpeta, fuera del repo. Para regenerar `site/data/usados.json.gz`:
+
+`python tools/build.py transfers ..\transferencias`
+
+Ese archivo sí se commitea. Los CSV no.
+
 Render redeploys on push. Each month is about 190 KB compressed, so 2018 to 2026 is roughly 20 MB.
 The site only downloads the months you select, never everything at once unless you pick "Todo el período".
 

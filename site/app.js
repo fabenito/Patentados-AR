@@ -24,8 +24,8 @@ const NOPASS = /CAMION|SEMIRREMOLQUE|REMOLQUE|ACOPLADO|TRACTOR|CHASIS|CARRETON|B
 const SINDATO = /^SIN (ESPECIFICACION|MARCA|DATO)/;
 
 /* ---------- estado ---------- */
-const st = { period: '', months: [], origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, q: '', ifam: -1, token: 0 };
-let IX = null, CFG = { grupos: [], serie: [] };
+const st = { period: '', months: [], origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, q: '', ifam: -1, upre: -1, token: 0 };
+let IX = null, CFG = { grupos: [], serie: [] }, U = null, uPick = -1;
 let sel = [], selP = [];
 const MD = new Map();
 const G = {
@@ -353,18 +353,84 @@ const toggle = (k, v, id) => { st[k] = st[k] === v ? -1 : v; $(id).value = st[k]
 function suggest(q) {
   const toks = norm(q).split(/\s+/).filter(Boolean);
   const list = [];
-  for (let i = 0; i < IX.fams.length && list.length < 10; i++) if (toks.every(t => IX.famSearch[i].includes(t))) list.push(i);
-  $('#sugg').innerHTML = list.length
-    ? list.map(i => `<button type="button" class="chip" data-f="${i}" aria-pressed="${i === st.ifam}">${esc(tc(IX.brands[IX.fams[i][0]]) + ' ' + tc(IX.fams[i][1]))}<span class="c num">${f0(IX.ftot[i])}</span></button>`).join('')
-    : '<span class="note">No encontré ese modelo. Probá con una parte del nombre.</span>';
-  $('#sugg').querySelectorAll('.chip').forEach(c => { c.onclick = () => showFam(+c.dataset.f); });
-  return list;
+  for (let i = 0; i < IX.fams.length && list.length < 8; i++) if (toks.every(t => IX.famSearch[i].includes(t))) list.push(i);
+  const extra = [];
+  if (U && toks.length) {
+    const seen = new Set(list.map(i => IX.brands[IX.fams[i][0]] + '|' + IX.fams[i][1]));
+    for (let i = 0; i < U.fams.length; i++) {
+      if (!(U.pre[i] > 0) || !toks.every(t => U.search[i].includes(t))) continue;
+      const f = U.fams[i];
+      if (seen.has(U.brands[f[0]] + '|' + f[1])) continue;
+      extra.push(i);
+    }
+    extra.sort((a, b) => U.pre[b] - U.pre[a]);
+    extra.splice(6);
+  }
+  const chips = list.map(i => {
+    const f = IX.fams[i], key = IX.brands[f[0]] + '|' + f[1];
+    const ui = U ? U.famM.get(key) : undefined;
+    const pre = ui !== undefined && U.pre[ui] > 0 ? ` · antes de 2018: ${f0(U.pre[ui])}` : '';
+    return `<button type="button" class="chip" data-f="${i}" aria-pressed="${i === st.ifam}">${esc(tc(IX.brands[f[0]]) + ' ' + tc(f[1]))}<span class="c num">${f0(IX.ftot[i])}${pre}</span></button>`;
+  }).concat(extra.map(i => `<button type="button" class="chip" data-u="${i}" aria-pressed="${i === st.upre}">${esc(uFamLabel(i))}<span class="c num">antes de 2018: ${f0(U.pre[i])}</span></button>`));
+  $('#sugg').innerHTML = chips.length ? chips.join('') : '<span class="note">No encontré ese modelo. Probá con una parte del nombre.</span>';
+  $('#sugg').querySelectorAll('.chip').forEach(c => {
+    c.onclick = () => c.dataset.u !== undefined ? showPre(+c.dataset.u) : showFam(+c.dataset.f);
+  });
+  return { list, extra };
 }
 $('#q').oninput = e => suggest(e.target.value);
-$('#q').onkeydown = e => { if (e.key === 'Enter') { const l = suggest(e.target.value); if (l.length) showFam(l[0]); } };
+$('#q').onkeydown = e => { if (e.key === 'Enter') { const l = suggest(e.target.value); if (l.list.length) showFam(l.list[0]); else if (l.extra.length) showPre(l.extra[0]); } };
 
+function preSeries(i) {
+  const cats = [], vals = [];
+  let total = 0, y0 = 0, y1 = 0;
+  if (!U || i === undefined || i < 0) return { cats, vals, total, y0, y1 };
+  U.years.forEach((y, k) => {
+    if (y >= 2018) return;
+    const v = U.fy[i][k] || 0;
+    cats.push(y); vals.push(v);
+    if (v > 0) { total += v; if (!y0) y0 = y; y1 = y; }
+  });
+  return { cats, vals, total, y0, y1 };
+}
+function drawPre(el, i) {
+  const s = preSeries(i);
+  if (!el || !s.total) return;
+  chart(el, {
+    cats: s.cats, series: [{ color: 'var(--s2)', v: s.vals }], h: 140,
+    label: 'Inscripciones anteriores a 2018 vistas en transferencias posteriores',
+    tip: k => `${s.cats[k]}: ${f0(s.vals[k])} de este modelo se habían patentado ese año y después se transfirieron`,
+    tick: k => s.cats[k] % 5 === 0 ? String(s.cats[k]) : '',
+  });
+}
+function preBlock(i) {
+  const s = preSeries(i);
+  if (!s.total) return '';
+  return `<h3 style="margin-top:18px">Antes de 2018</h3>
+    <div class="kv"><span><b>${f0(s.total)}</b> se habían patentado entre ${s.y0} y ${s.y1}</span><span>visto porque se transfirieron entre ${mLabel(U.months[0])} y ${mLabel(U.months[U.months.length - 1])}</span></div>
+    <div id="f-pre" style="margin-top:8px"></div>
+    <p class="note">Cada barra es la fecha de inscripción inicial de autos de este modelo que después cambiaron de dueño. No es el total patentado ese año: el que nunca se transfirió en ese período no aparece, y uno transferido dos veces cuenta dos.</p>`;
+}
+function markChips() {
+  document.querySelectorAll('#sugg .chip').forEach(c => {
+    const on = c.dataset.u !== undefined ? +c.dataset.u === st.upre : +c.dataset.f === st.ifam;
+    c.setAttribute('aria-pressed', on);
+  });
+}
+function showPre(i) {
+  st.ifam = -1; st.upre = i;
+  const s = preSeries(i), lab = uFamLabel(i);
+  $('#fres').innerHTML = `<div class="big"><div><div class="fam">${esc(lab)}</div><div class="l">no está en el padrón mensual desde 2018</div></div>
+      <div><div class="n num">${f0(s.total)}</div><div class="l">patentados antes de 2018 y transferidos después</div></div>
+      <div><div class="n num">${s.y0 || '–'}</div><div class="l">${s.y0 ? 'inscripción más antigua vista' + (s.y1 && s.y1 !== s.y0 ? ', hasta ' + s.y1 : '') : 'sin fecha anterior a 2018'}</div></div></div>
+    <div id="f-pre"></div>
+    <p class="note">Este nombre no aparece en los patentamientos mensuales, o está escrito distinto. Las barras salen de la fecha de inscripción inicial en las transferencias de ${mLabel(U.months[0])} a ${mLabel(U.months[U.months.length - 1])}. No es el padrón completo de esos años.</p>`;
+  drawPre($('#f-pre'), i);
+  markChips();
+}
 function showFam(ifam) {
   st.ifam = ifam;
+  st.upre = -1;
   const [bi, fname] = IX.fams[ifam], brand = IX.brands[bi], label = tc(brand) + ' ' + tc(fname);
   const series = IX.fs[ifam], total = IX.ftot[ifam];
   const selIdx = new Set(st.months.map(m => IX.pos.get(m)));
@@ -409,10 +475,11 @@ function showFam(ifam) {
       <div><div class="n num">${f0(per)}</div><div class="l">en ${esc(perTxt)}</div></div>
       <div><div class="n num">${rank ? '#' + f0(rank) : '–'}</div><div class="l">${rank ? 'puesto entre ' + f0(active) + ' modelos patentados en ese período' : 'sin unidades en el período'}</div></div></div>
     <div class="kv"><span>Mejor mes: <b>${series[best] > 0 ? mLabel(IX.months[best].m) + ' (' + f0(series[best]) + ')' : '–'}</b></span><span>Meses con patentamientos: <b>${f0(nz)} de ${f0(IX.avail.length)}</b></span>
-      <span><a href="https://listado.mercadolibre.com.ar/${slug(label + (recent ? ' 0km' : ''))}" target="_blank" rel="noopener">Ver precios de ${esc(label)} en Mercado Libre</a></span></div>
+      <span><a href="https://listado.mercadolibre.com.ar/${slug(label + (recent ? ' 0km' : ''))}" target="_blank" rel="noopener">Ver precios de ${esc(label)} en Mercado Libre</a></span>${usadosSpan(brand, fname)}</div>
     <div id="f-chart" style="margin-top:16px"></div>
     ${detail}
-    <p class="note">Son patentamientos iniciales en los meses cargados. No es la cantidad que circula hoy: un auto patentado antes de ${esc(mLabel(IX.months[0].m))} no está en estas cuentas. Los precios de Mercado Libre son los de hoy.</p>`;
+    ${preBlock(U ? U.famM.get(brand + '|' + fname) : undefined)}
+    <p class="note">Las barras azules son patentamientos iniciales del padrón mensual. Un auto patentado antes de ${esc(mLabel(IX.months[0].m))} no entra en esas barras. Los precios de Mercado Libre son los de hoy.</p>`;
   if (after) after();
   chart($('#f-chart'), {
     cats: IX.months, series: [{ color: 'var(--s1)', v: series }], sel: selIdx, h: 150, label: 'Patentamientos por mes de ' + label,
@@ -420,7 +487,9 @@ function showFam(ifam) {
     tip: i => `${mLabel(IX.months[i].m)}: ${IX.months[i].file ? f0(series[i]) : 'sin datos cargados'}`,
     tick: tickFn, pick: i => { if (IX.months[i].file) setPeriod('m:' + IX.months[i].m); },
   });
-  document.querySelectorAll('#sugg .chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.f === ifam));
+  const ui = U ? U.famM.get(brand + '|' + fname) : undefined;
+  if (ui !== undefined) drawPre($('#f-pre'), ui);
+  markChips();
 }
 function tickFn(i) {
   const n = IX.months.length, m = IX.months[i].m;
@@ -609,13 +678,152 @@ function renderElectricos() {
   }));
 }
 
+/* ---------- usados y transferencias ---------- */
+function sumAt(arr, ids) {
+  let t = 0;
+  if (!arr) return 0;
+  for (let k = 0; k < ids.length; k++) t += arr[ids[k]] || 0;
+  return t;
+}
+function transferIds() {
+  if (!U || !st.months.length) return [];
+  const ids = [];
+  for (const m of st.months) { const i = U.pos.get(m); if (i !== undefined) ids.push(i); }
+  return ids;
+}
+function uFamLabel(i) {
+  const f = U.fams[i];
+  return tc(U.brands[f[0]]) + ' ' + tc(f[1]);
+}
+function pickUsado(i) {
+  uPick = uPick === i ? -1 : i;
+  renderUsados();
+  if (uPick < 0) return;
+  const f = U.fams[i], key = U.brands[f[0]] + '|' + f[1];
+  const k = IX.famKey.get(key);
+  if (k !== undefined) showFam(k); else showPre(i);
+  $('#buscador').scrollIntoView({ behavior: 'smooth' });
+}
+async function loadUsados() {
+  try {
+    const d = await getMonthJSON('usados.json.gz');
+    d.pos = new Map(d.months.map((m, i) => [m, i]));
+    d.famM = new Map(d.fams.map((f, i) => [d.brands[f[0]] + '|' + f[1], i]));
+    d.search = d.fams.map(f => norm(d.brands[f[0]] + ' ' + f[1]));
+    d.pre = d.fy.map(row => { let t = 0; for (let y = 0; y < d.years.length; y++) if (d.years[y] < 2018) t += row[y] || 0; return t; });
+    U = d;
+  } catch (e) {
+    U = null;
+    console.error(e);
+  }
+  renderUsados();
+  if ($('#q')) suggest($('#q').value);
+  if (U && st.ifam >= 0) showFam(st.ifam);
+  else if (U && st.upre >= 0) showPre(st.upre);
+}
+function usadosSpan(brand, fname) {
+  if (!U) return '';
+  const i = U.famM.get(brand + '|' + fname);
+  if (i === undefined) return '';
+  const ids = transferIds();
+  const n = sumAt(U.fs[i], ids), pj = sumAt(U.fpj[i], ids), to = sumAt(U.fto[i], ids), fr = sumAt(U.ffr[i], ids);
+  if (!n) return '';
+  return `<span>Transferencias en el período <b>${f0(n)}</b> · primer dueño empresa ${pc(pj / n)} · hacia comerciante ${pc(to / n)} · desde comerciante ${pc(fr / n)}</span>`;
+}
+function flujoHTML(el, partes) {
+  const tot = partes.reduce((s, p) => s + p.v, 0);
+  if (!tot) { el.innerHTML = '<div class="more">No hay transferencias en el período.</div>'; return; }
+  el.innerHTML = `<div class="stack">${partes.map(p => p.v ? `<i style="flex:${p.v};background:${p.color}" data-tip="${esc(p.label)}: ${f0(p.v)} (${pc(p.v / tot)})"></i>` : '').join('')}</div>
+    <div class="legend">${partes.map(p => `<div><span class="sw" style="background:${p.color}"></span>${esc(p.label)}<span class="nn num">${f0(p.v)} · ${pc(p.v / tot)}</span></div>`).join('')}</div>`;
+}
+function renderUsados() {
+  const box = $('#u-stats');
+  if (!box) return;
+  if (!U) {
+    box.innerHTML = '<div class="stat"><div class="k">Cargando transferencias…</div></div>';
+    return;
+  }
+  const ids = transferIds();
+  if (!ids.length) {
+    box.innerHTML = '<div class="stat"><div class="k">No hay transferencias en el período elegido.</div></div>';
+    ['#u-mes', '#u-marcas', '#u-modelos', '#u-dueno', '#u-flujo', '#u-empresa', '#u-desde', '#u-hacia', '#u-anio', '#u-anio-leg', '#u-det'].forEach(s => { const n = $(s); if (n) n.innerHTML = ''; });
+    return;
+  }
+  let n = 0, pj = 0, to = 0, fr = 0;
+  ids.forEach(i => { n += U.n[i]; pj += U.pj[i]; to += U.to[i]; fr += U.fr[i]; });
+  const stats = [[f0(n), 'Vehículos transferidos'], [pc(pj / n), 'Primer dueño empresa'], [pc(fr / n), 'Desde comerciante habitual'], [pc(to / n), 'Hacia comerciante habitual']];
+  box.innerHTML = stats.map(x => `<div class="stat"><div class="v num">${x[0]}</div><div class="k">${x[1]}</div></div>`).join('');
+  const perTxt = ids.length === 1 ? mLabel(U.months[ids[0]]) : `${mShort(U.months[ids[0]])} a ${mShort(U.months[ids[ids.length - 1]])}`;
+  chart($('#u-mes'), {
+    cats: ids, series: [
+      { color: 'var(--s1)', v: ids.map(i => U.n[i] - U.pj[i]) },
+      { color: 'var(--s2)', v: ids.map(i => U.pj[i]) },
+    ], h: 180, label: 'Transferencias por mes',
+    tip: k => `${mLabel(U.months[ids[k]])}: ${f0(U.n[ids[k]])} transferencias, ${f0(U.pj[ids[k]])} con primer dueño empresa`,
+    tick: k => ids.length <= 14 ? mShort(U.months[ids[k]]) : U.months[ids[k]].endsWith('-01') ? U.months[ids[k]].slice(0, 4) : '',
+  });
+  const brands = U.brands.map((_, b) => [b, sumAt(U.bs[b], ids)]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  bars($('#u-marcas'), brands.slice(0, 12).map(([b, v]) => ({
+    label: tc(U.brands[b]), v, tip: `${tc(U.brands[b])}: ${f0(v)} (${pc(v / n)})`,
+    click: () => { const i = G.marcaM.get(U.brands[b]); if (i !== undefined) { st.brand = st.brand === i ? -1 : i; $('#f-brand').value = st.brand; update(); } },
+    on: G.marcaM.get(U.brands[b]) === st.brand,
+  })));
+  const fams = U.fams.map((_, f) => [f, sumAt(U.fs[f], ids), sumAt(U.fpj[f], ids), sumAt(U.fto[f], ids), sumAt(U.ffr[f], ids)]).filter(x => x[1] > 0);
+  fams.sort((a, b) => b[1] - a[1]);
+  const famBar = (rows, key) => rows.slice(0, 8).map(x => ({ label: uFamLabel(x[0]), v: x[key], tip: `${uFamLabel(x[0])}: ${f0(x[key])}`, click: () => pickUsado(x[0]), on: uPick === x[0] }));
+  bars($('#u-modelos'), famBar(fams, 1));
+  flujoHTML($('#u-dueno'), [
+    { label: 'Primer dueño persona', v: n - pj, color: 'var(--s1)' },
+    { label: 'Primer dueño empresa', v: pj, color: 'var(--s2)' },
+  ]);
+  flujoHTML($('#u-flujo'), [
+    { label: 'Transferencia común', v: Math.max(0, n - to - fr), color: 'var(--s1)' },
+    { label: 'Desde comerciante habitual', v: fr, color: 'var(--s3)' },
+    { label: 'Hacia comerciante habitual', v: to, color: 'var(--s2)' },
+  ]);
+  const porEmpresa = fams.filter(x => x[2] > 0).sort((a, b) => b[2] - a[2]);
+  const porDesde = fams.filter(x => x[4] > 0).sort((a, b) => b[4] - a[4]);
+  const porHacia = fams.filter(x => x[3] > 0).sort((a, b) => b[3] - a[3]);
+  bars($('#u-empresa'), famBar(porEmpresa, 2));
+  bars($('#u-desde'), famBar(porDesde, 4));
+  bars($('#u-hacia'), famBar(porHacia, 3));
+  const corte = U.years.findIndex(y => y >= 2018);
+  const antes = new Float64Array(U.years.length), despues = new Float64Array(U.years.length);
+  ids.forEach(i => U.iy[i].forEach((v, y) => { (corte < 0 || y < corte ? antes : despues)[y] += v; }));
+  chart($('#u-anio'), {
+    cats: U.years, series: [{ color: 'var(--s2)', v: Array.from(antes) }, { color: 'var(--s1)', v: Array.from(despues) }],
+    h: 180, label: 'Año de la inscripción inicial de los autos transferidos en ' + perTxt,
+    tip: k => `${U.years[k]}: ${f0(antes[k] + despues[k])} autos transferidos en el período se habían patentado ese año`,
+    tick: k => U.years[k] % 5 === 0 ? String(U.years[k]) : '',
+  });
+  $('#u-anio-leg').innerHTML = '<div><span class="sw" style="background:var(--s2)"></span>Patentados antes de 2018</div><div><span class="sw" style="background:var(--s1)"></span>Patentados desde 2018</div>';
+  if (uPick < 0 || !U.fs[uPick]) { $('#u-det').innerHTML = ''; return; }
+  const un = sumAt(U.fs[uPick], ids), upj = sumAt(U.fpj[uPick], ids), uto = sumAt(U.fto[uPick], ids), ufr = sumAt(U.ffr[uPick], ids);
+  const lab = uFamLabel(uPick);
+  const ya = U.fy[uPick].map((v, k) => v > 0 ? [U.years[k], v] : null).filter(Boolean);
+  const y0 = ya.length ? ya[0][0] : null, y1 = ya.length ? ya[ya.length - 1][0] : null;
+  $('#u-det').innerHTML = `<h3 style="margin-top:16px">${esc(lab)}</h3>
+    <div class="kv"><span><b>${f0(un)}</b> transferencias en el período</span><span>primer dueño empresa <b>${un ? pc(upj / un) : '–'}</b></span><span>hacia comerciante <b>${un ? pc(uto / un) : '–'}</b></span><span>desde comerciante <b>${un ? pc(ufr / un) : '–'}</b></span>${y0 ? `<span>inscripción vista <b>${y0}${y0 === y1 ? '' : ' a ' + y1}</b>, en todas las transferencias cargadas</span>` : ''}</div>
+    <div id="u-det-anio" style="margin-top:10px"></div>`;
+  if (ya.length) {
+    const aa = U.fy[uPick].map((v, k) => U.years[k] < 2018 ? v : 0);
+    const dd = U.fy[uPick].map((v, k) => U.years[k] >= 2018 ? v : 0);
+    chart($('#u-det-anio'), {
+      cats: U.years, series: [{ color: 'var(--s2)', v: aa }, { color: 'var(--s1)', v: dd }], h: 140,
+      label: 'Año de patentamiento de los usados ' + lab,
+      tip: k => `${U.years[k]}: ${f0(U.fy[uPick][k])}`,
+      tick: k => U.years[k] % 5 === 0 ? String(U.years[k]) : '',
+    });
+  }
+}
+
 /* ---------- ciclo principal ---------- */
 function update() {
   sel = buildSel(st.months, true);
   renderHint(); renderStats(); renderTiempo(); renderOrigen(); renderListas(); renderRaros(); renderExoticos(); renderClasicos(); renderElectricos();
-  renderEvo();
+  renderEvo(); renderUsados();
 }
-let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (IX && st.months.length) { renderTiempo(); renderEvo(); renderExoticos(); if (st.ifam >= 0) showFam(st.ifam); } }, 150); });
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (IX && st.months.length) { renderTiempo(); renderEvo(); renderExoticos(); renderUsados(); if (st.ifam >= 0) showFam(st.ifam); } }, 150); });
 
 /* ---------- arranque ---------- */
 async function init() {
@@ -642,8 +850,10 @@ async function init() {
   const h = location.hash.slice(1);
   const start = /^\d{4}-\d{2}$/.test(h) && IX.pos.has(h) && IX.months[IX.pos.get(h)].file ? 'm:' + h : 'm:' + z;
   suggest('');
+  const pendientes = loadUsados();
   await setPeriod(start);
   showFam(0);
+  await pendientes;
 }
 init();
 })();

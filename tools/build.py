@@ -67,6 +67,35 @@ def limpiar(s, default):
     return s.fillna(default).astype(str).str.strip().replace("", default)
 
 
+def partir_recorrido(seq):
+    """One car stays in one province at a time. A later province is the same car changing hands.
+    Two provinces on the same day are two cars."""
+    tracks = []
+    for fecha, prov in sorted(seq):
+        prov = prov or ""
+        stay = move = None
+        for t in tracks:
+            if fecha < t["last"]:
+                continue
+            if fecha == t["last"]:
+                if prov == t["prov"]:
+                    stay = t
+                continue
+            if prov == t["prov"]:
+                if stay is None:
+                    stay = t
+            elif move is None or t["last"] > move["last"]:
+                move = t
+        dest = stay or move
+        if dest is None:
+            tracks.append({"hops": [[fecha, prov]], "last": fecha, "prov": prov})
+        elif not (dest["last"] == fecha and dest["prov"] == prov):
+            dest["hops"].append([fecha, prov])
+            dest["last"] = fecha
+            dest["prov"] = prov
+    return [t["hops"] for t in tracks]
+
+
 def familia(modelo: str) -> str:
     t = modelo.split()
     if not t:
@@ -601,9 +630,10 @@ def procesar_transferencias(entradas, out_dir: Path):
         car_list = []
         for (insc_d, am), hops in cars.items():
             seq = [[f, p] for f, p in sorted(hops)]
-            provs = [p for _, p in seq]
-            changes = sum(a != b for a, b in zip(provs, provs[1:]))
-            car_list.append((changes, insc_d or "9999", [insc_d, am, seq]))
+            for parte in partir_recorrido(seq):
+                provs = [p for _, p in parte]
+                changes = sum(a != b for a, b in zip(provs, provs[1:]))
+                car_list.append((changes, insc_d or "9999", [insc_d, am, parte]))
         car_list.sort(key=lambda c: (-c[0], c[1]))
         rv.append([marca, familia(modelo), modelo, [c[2] for c in car_list]])
     rv.sort(key=lambda r: (r[0], r[1], r[2]))

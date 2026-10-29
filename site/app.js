@@ -415,13 +415,62 @@ $('#q').oninput = e => suggest(e.target.value);
 $('#q').onkeydown = e => { if (e.key === 'Enter') { const l = suggest(e.target.value); st.followModel = true; if (l.list.length) showFam(l.list[0]); else if (l.extra.length) showPre(l.extra[0]); else st.followModel = false; } };
 
 function ymText(ym) { return MESES[(ym % 100) - 1] + ' ' + Math.floor(ym / 100); }
-function rarePreCount(i) {
+function partirRecorrido(hops) {
+  const ordered = (hops || []).slice().sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+  const tracks = [];
+  for (const h of ordered) {
+    const fecha = h[0], prov = h[1] || '';
+    let stay = null, move = null;
+    for (const t of tracks) {
+      if (fecha < t.last) continue;
+      if (fecha === t.last) { if (prov === t.prov) stay = t; continue; }
+      if (prov === t.prov) { if (!stay) stay = t; }
+      else if (!move || t.last > move.last) move = t;
+    }
+    const dest = stay || move;
+    if (!dest) tracks.push({ hops: [[fecha, prov]], last: fecha, prov });
+    else if (!(dest.last === fecha && dest.prov === prov)) {
+      dest.hops.push([fecha, prov]);
+      dest.last = fecha;
+      dest.prov = prov;
+    }
+  }
+  return tracks.map(t => t.hops);
+}
+function caminoProv(hops) {
+  const out = [];
+  (hops || []).forEach(h => {
+    const p = h[1] ? provNice(h[1], h[1]) : '';
+    if (p && out[out.length - 1] !== p) out.push(p);
+  });
+  return out.join(' → ');
+}
+function unidadesRare(i) {
   if (!U || !U.rvM || i == null || i < 0) return null;
   const f = U.fams[i];
   if (!f) return null;
   const items = U.rvM.get(norm(U.brands[f[0]]) + '|' + norm(f[1]));
   if (!items || !items.length) return null;
-  const modelos = new Set(items.map(it => it[2]));
+  const cars = [];
+  items.forEach(item => (item[3] || []).forEach(raw => {
+    partirRecorrido(raw[2]).forEach(hops => cars.push({ modelo: item[2], insc: raw[0] || '', anio: raw[1] || 0, hops }));
+  }));
+  return cars;
+}
+function preYearMap(i) {
+  const cars = unidadesRare(i);
+  if (!cars) return null;
+  const m = new Map();
+  cars.forEach(c => {
+    const y = +String(c.insc || '').slice(0, 4);
+    if (y > 0 && y < 2018) m.set(y, (m.get(y) || 0) + 1);
+  });
+  return m;
+}
+function rarePreCount(i) {
+  const cars = unidadesRare(i);
+  if (!cars) return null;
+  const modelos = new Set(cars.map(c => c.modelo));
   const month = new Map(), byMonthVer = new Map(), allVer = new Map();
   const add = (ym, modelo, n) => {
     if (!(n > 0) || !ym) return;
@@ -431,17 +480,20 @@ function rarePreCount(i) {
     if (!mv) { mv = new Map(); byMonthVer.set(ym, mv); }
     mv.set(modelo, (mv.get(modelo) || 0) + n);
   };
-  items.forEach(item => item[3].forEach(car => {
-    const insc = String(car[0] || '');
+  const previas = [];
+  cars.forEach(car => {
+    const insc = String(car.insc || '');
     if (insc.length < 7) return;
     const y = +insc.slice(0, 4), mo = +insc.slice(5, 7);
     if (!(y > 0 && y < 2018 && mo >= 1 && mo <= 12)) return;
-    add(y * 100 + mo, item[2], 1);
-  }));
+    const ym = y * 100 + mo;
+    add(ym, car.modelo, 1);
+    previas.push({ modelo: car.modelo, insc: car.insc, ym, hops: car.hops });
+  });
   ((U.fyv && U.fyv[i]) || []).forEach(row => {
     (row[2] || []).forEach(([name, v]) => { if (!modelos.has(name)) add(row[0], name, v); });
   });
-  return { month, byMonthVer, allVer };
+  return { month, byMonthVer, allVer, cars: previas };
 }
 function preShown(i) {
   const rc = rarePreCount(i);
@@ -521,7 +573,7 @@ function preBlock(i) {
   if (!s.total) return '';
   const cuantos = s.once && Math.round(s.total) === 1 ? 'se patentó' : 'se habían patentado';
   const aviso = s.once
-    ? 'Cada auto cuenta una sola vez. Si después cambió de dueño, sigue siendo el mismo patentamiento: lo separa la fecha en que se patentó y el año modelo.'
+    ? 'Cada auto cuenta una sola vez, por el día en que se patentó. Si en el recorrido cambia la provincia, es el mismo auto pasando de un dueño al siguiente.'
     : 'No es el total patentado ese mes: el que nunca se transfirió en ese período no aparece, y uno transferido dos veces cuenta dos.';
   return `<h3 style="margin-top:18px">Antes de 2018</h3>
     <div class="kv"><span><b>${f0(s.total)}</b> ${cuantos} entre ${s.y0} y ${s.y1}</span><span>visto porque se transfirieron entre ${mLabel(U.months[0])} y ${mLabel(U.months[U.months.length - 1])}</span></div>
@@ -543,7 +595,14 @@ function drawPreVersions(i) {
     el.innerHTML = '<div class="more">No hay versiones con nombre para ese mes.</div>';
     return;
   }
-  bars(el, rows.map(([name, v]) => ({ label: tc(name), v, tip: `${tc(name)}: ${f0(v)}` })));
+  const rc = rarePreCount(i);
+  bars(el, rows.map(([name, v]) => {
+    const unos = rc && rc.cars ? rc.cars.filter(c => c.modelo === name && (preYear == null || c.ym === preYear)) : [];
+    const tip = unos.length && unos.length <= 4
+      ? unos.map(c => `${tc(name)}, inscripto el ${fechaCorta(c.insc)}: ${caminoProv(c.hops) || 'sin provincia'}`).join(' · ')
+      : `${tc(name)}: ${f0(v)}`;
+    return { label: tc(name), v, tip };
+  }));
 }
 function markChips() {
   document.querySelectorAll('#sugg .chip').forEach(c => {
@@ -556,7 +615,7 @@ function showPre(i) {
   st.ifam = -1; st.upre = i;
   const s = preSeries(i), lab = uFamLabel(i);
   const inscLbl = Math.round(s.total) === 1 ? 'patentado antes de 2018 y transferido después' : 'patentados antes de 2018 y transferidos después';
-  const once = s.once ? ' Cada auto cuenta una sola vez: un cambio de dueño no suma otro patentamiento.' : '';
+  const once = s.once ? ' Cada auto cuenta una sola vez, por el día en que se patentó. Si en el recorrido cambia la provincia, es el mismo auto pasando de un dueño al siguiente.' : '';
   $('#fres').innerHTML = `<div class="big"><div><div class="fam">${esc(lab)}</div><div class="l">no está en el padrón mensual desde 2018</div></div>
       <div><div class="n num">${f0(s.total)}</div><div class="l">${inscLbl}</div></div>
       <div><div class="n num">${s.y0 || '–'}</div><div class="l">${s.y0 ? 'inscripción más antigua vista' + (s.y1 && s.y1 !== s.y0 ? ', hasta ' + s.y1 : '') : 'sin fecha anterior a 2018'}</div></div></div>
@@ -909,7 +968,9 @@ function renderRecorrido(brand, fam) {
   if (!el) return;
   const items = (U && U.rvM && U.rvM.get(norm(brand) + '|' + norm(fam))) || [];
   const cars = [];
-  items.forEach(item => item[3].forEach(car => cars.push({ modelo: item[2], insc: car[0], anio: car[1], hops: car[2] })));
+  items.forEach(item => item[3].forEach(car => {
+    partirRecorrido(car[2]).forEach(hops => cars.push({ modelo: item[2], insc: car[0], anio: car[1], hops }));
+  }));
   if (!cars.length || cars.length > 24) { el.innerHTML = ''; return; }
   cars.sort((a, b) => {
     const ch = c => c.hops.reduce((s, h, i) => s + (i && h[1] !== c.hops[i - 1][1] ? 1 : 0), 0);
@@ -927,7 +988,7 @@ function renderRecorrido(brand, fam) {
       return `<div class="unidad"><div class="kv"><span><b>${esc(tc(car.modelo))}</b></span><span>inscripto el ${esc(fechaCorta(car.insc))}</span>${anio}</div><ol class="path">${steps}</ol></div>`;
     }).join('');
     const more = cars.length > n ? `<button type="button" class="btn more-btn" id="f-rc-more">Mostrar más (${f0(cars.length - n)} restantes)</button>` : '';
-    el.innerHTML = `<h3 style="margin-top:18px">Recorrido</h3>${html}${more}<p class="note">Cada auto se separa por la fecha en que se patentó y el año modelo, porque el archivo no trae el dominio. La provincia es la del registro de esa transferencia. Cuando cambia, el auto pasó de una provincia a la otra. Solo entra si ese nombre tuvo pocas transferencias.</p>`;
+    el.innerHTML = `<h3 style="margin-top:18px">Recorrido</h3>${html}${more}<p class="note">El mismo día de patentamiento y el mismo año modelo son el mismo auto: el archivo no trae el dominio. Cada provincia es el registro de esa venta. Si cambia, el auto pasó de un dueño al siguiente. Dos provincias el mismo día cuentan como dos autos.</p>`;
     const btn = $('#f-rc-more');
     if (btn) btn.onclick = () => draw(n + 8);
   };
@@ -1096,12 +1157,18 @@ function renderUsados() {
     <div class="kv"><span><b>${f0(un)}</b> transferencias en el período</span><span>primer dueño empresa <b>${un ? pc(upj / un) : '–'}</b></span><span>hacia comerciante <b>${un ? pc(uto / un) : '–'}</b></span><span>desde comerciante <b>${un ? pc(ufr / un) : '–'}</b></span>${y0 ? `<span>inscripción vista <b>${y0}${y0 === y1 ? '' : ' a ' + y1}</b>, en todas las transferencias cargadas</span>` : ''}</div>
     <div id="u-det-anio" style="margin-top:10px"></div>`;
   if (ya.length) {
-    const aa = U.fy[uPick].map((v, k) => U.years[k] < 2018 ? v : 0);
-    const dd = U.fy[uPick].map((v, k) => U.years[k] >= 2018 ? v : 0);
+    const porAnio = preYearMap(uPick);
+    const valorAnio = k => {
+      const y = U.years[k];
+      if (porAnio && y < 2018) return porAnio.get(y) || 0;
+      return U.fy[uPick][k] || 0;
+    };
+    const aa = U.years.map((y, k) => y < 2018 ? valorAnio(k) : 0);
+    const dd = U.years.map((y, k) => y >= 2018 ? (U.fy[uPick][k] || 0) : 0);
     chart($('#u-det-anio'), {
       cats: U.years, series: [{ color: 'var(--s2)', v: aa }, { color: 'var(--s1)', v: dd }], h: 140,
       label: 'Año de patentamiento de los usados ' + lab,
-      tip: k => `${U.years[k]}: ${f0(U.fy[uPick][k])}`,
+      tip: k => `${U.years[k]}: ${f0(valorAnio(k))}`,
       tick: k => U.years[k] % 5 === 0 ? String(U.years[k]) : '',
     });
   }

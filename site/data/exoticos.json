@@ -1,0 +1,52 @@
+{
+  "nota": "Editá este archivo para cambiar qué cuenta como exótico. 'marcas' se compara con el nombre de marca del registro (en mayúsculas). 'modelos' usa una expresión regular sobre el texto del modelo, sin distinguir mayúsculas. Un vehículo cae en el primer grupo que coincida. No hace falta volver a procesar los CSV.",
+  "serie": ["FERRARI", "LAMBORGHINI", "MCLAREN", "BUGATTI", "PAGANI", "KOENIGSEGG", "ASTON MARTIN", "LOTUS", "BENTLEY", "ROLLS ROYCE", "ROLLS-ROYCE", "MAYBACH", "MASERATI"],
+  "grupos": [
+    {
+      "id": "super",
+      "nombre": "Superdeportivos",
+      "marcas": ["FERRARI", "LAMBORGHINI", "MCLAREN", "BUGATTI", "PAGANI", "KOENIGSEGG", "ASTON MARTIN", "LOTUS", "LISTER", "NOBLE", "SALEEN"],
+      "modelos": [
+        { "marca": "PORSCHE", "patron": "\\bGT[234]\\b|\\b918\\b|CARRERA GT|\\bTURBO S\\b" },
+        { "marca": "NISSAN", "patron": "GT-?R" },
+        { "marca": "AUDI", "patron": "\\bR8\\b" },
+        { "marca": "MERCEDES BENZ", "patron": "AMG GT|\\bSLS\\b" },
+        { "marca": "DODGE", "patron": "VIPER" },
+        { "marca": "HONDA", "patron": "\\bNSX\\b" },
+        { "marca": "LEXUS", "patron": "\\bLFA\\b" },
+        { "marca": "FORD", "patron": "^GT\\b" },
+        { "marca": "CHEVROLET", "patron": "CORVETTE.*(Z06|ZR1|E-RAY)" }
+      ]
+    },
+    {
+      "id": "lujo",
+      "nombre": "Lujo extremo",
+      "marcas": ["BENTLEY", "ROLLS ROYCE", "ROLLS-ROYCE", "MAYBACH", "MASERATI"],
+      "modelos": [
+        { "marca": "MERCEDES BENZ", "patron": "MAYBACH" }
+      ]
+    },
+    {
+      "id": "culto",
+      "nombre": "Deportivos de culto",
+      "marcas": ["ALPINE", "CATERHAM", "MORGAN", "TVR"],
+      "modelos": [
+        { "marca": "PORSCHE", "patron": "^(911|9\\d\\d|718|356|944|928|CAYMAN|BOXSTER)\\b" },
+        { "marca": "CHEVROLET", "patron": "CORVETTE|CAMARO" },
+        { "marca": "FORD", "patron": "MUSTANG" },
+        { "marca": "DODGE", "patron": "CHALLENGER|CHARGER|HELLCAT" },
+        { "marca": "BMW", "patron": "\\bM[2-8]\\b|\\bZ[34]\\b|\\bZ8\\b" },
+        { "marca": "AUDI", "patron": "\\bRS ?[3-7]\\b|\\bTT ?RS\\b" },
+        { "marca": "MERCEDES BENZ", "patron": "^(?!.*\\bGL[ABCES]\\b).*\\bAMG\\b|\\bSL\\b|\\bSLK\\b|\\b(250|280|300|450|500) ?SL\\b|\\bSL ?\\d{2,3}\\b" },
+        { "marca": "TOYOTA", "patron": "SUPRA|\\bGR ?(86|YARIS|COROLLA|SUPRA)\\b|\\bMR2\\b" },
+        { "marca": "MAZDA", "patron": "MX-?5|MIATA|RX-?[78]" },
+        { "marca": "HONDA", "patron": "TYPE ?R|\\bS2000\\b" },
+        { "marca": "MITSUBISHI", "patron": "ECLIPSE|LANCER EVO|3000 ?GT" },
+        { "marca": "SUBARU", "patron": "\\bWRX\\b|\\bSTI\\b|BRZ" },
+        { "marca": "ALFA ROMEO", "patron": "\\b4C\\b|QUADRIFOGLIO|SPRINT|SPIDER|GIULIA GTA" },
+        { "marca": "AUSTIN HEALEY", "patron": "." },
+        { "marca": "JAGUAR", "patron": "\\bE-?TYPE\\b|\\bF-?TYPE\\b|\\bXK\\b" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: patentados-ar
+    runtime: static
+    buildCommand: echo "sitio estatico, nada que compilar"
+    staticPublishPath: ./site

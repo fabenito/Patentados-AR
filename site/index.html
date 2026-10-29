@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Patentados AR</title>
+<meta name="description" content="Qué se patentó por primera vez en Argentina, mes a mes: modelos, rarezas, superdeportivos, clásicos y enlaces a precios en Mercado Libre.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <div class="plate" aria-label="Patentados AR"><div class="band">ARGENTINA</div><div class="nm">Patentados</div></div>
+    <div>
+      <p>Todo lo que se patentó por primera vez en Argentina, mes a mes: 0 km, importados, clásicos, camiones y acoplados. Buscá un modelo, elegí el período y mirá qué tan raro es lo que te gusta.</p>
+      <p class="src" id="cobertura">Cargando datos…</p>
+    </div>
+  </header>
+
+  <div class="fbar" id="fbar" role="group" aria-label="Período y filtros">
+    <div class="row">
+      <div class="grp"><label class="lbl" for="f-per">Período</label><select id="f-per"></select></div>
+      <div class="grp" id="f-orig"><span class="lbl">Origen</span></div>
+      <select id="f-era" aria-label="Antigüedad"></select>
+      <select id="f-brand" aria-label="Marca"></select>
+      <select id="f-tipo" aria-label="Carrocería"></select>
+      <select id="f-prov" aria-label="Provincia"></select>
+      <select id="f-pers" aria-label="Titular"><option value="-1">Todos los titulares</option><option value="0">Personas</option><option value="1">Empresas</option></select>
+      <input id="f-q" type="search" placeholder="El modelo contiene…" aria-label="El modelo contiene">
+      <button class="reset" id="reset" type="button">Limpiar filtros</button>
+      <span class="estado" id="estado" role="status" aria-live="polite"></span>
+    </div>
+  </div>
+
+  <section id="buscador" aria-labelledby="h-buscador">
+    <div class="sec-h"><h2 id="h-buscador">¿Cuántos se patentaron de este modelo?</h2><span class="hint">Cuenta todos los meses cargados. El detalle usa el período de arriba y no los otros filtros.</span></div>
+    <div class="panel">
+      <div class="finder-top">
+        <input id="q" type="search" placeholder="Escribí un modelo: Hilux, Mustang, Corvette, Amarok, 911…" autocomplete="off" aria-label="Buscar un modelo">
+      </div>
+      <div class="chips" id="sugg" aria-label="Modelos que coinciden"></div>
+      <div id="fres"></div>
+    </div>
+  </section>
+
+  <section id="evolucion" aria-labelledby="h-evo">
+    <div class="sec-h"><h2 id="h-evo">Patentamientos mes a mes</h2><span class="hint">Tocá una barra para ver ese mes. No usa los filtros.</span></div>
+    <div class="panel">
+      <div id="evo"></div>
+      <div class="legend row-legend" id="evo-leg"></div>
+    </div>
+  </section>
+
+  <main id="tablero">
+    <div class="sec-h" style="margin-top:28px"><h2 id="h-res">Resumen de la selección</h2><span class="hint" id="sel-hint"></span></div>
+    <div class="stats" id="stats"></div>
+
+    <section aria-labelledby="h-tiempo">
+      <div class="sec-h"><h2 id="h-tiempo">Patentamientos por día</h2><span class="hint" id="tiempo-hint"></span></div>
+      <div class="panel"><div id="tiempo"></div>
+        <div class="leg2" id="tiempo-leg"><span>Día hábil</span><span class="we">Fin de semana</span></div></div>
+    </section>
+
+    <section>
+      <div class="grid">
+        <div class="panel"><h3>Origen</h3><div id="origen"></div></div>
+        <div class="panel"><h3>Carrocería <span class="hint">tocá para filtrar</span></h3><div id="tipo" class="bars"></div></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="grid">
+        <div class="panel"><h3>Marcas más patentadas <span class="hint">tocá para filtrar</span></h3><div id="marcas" class="bars"></div></div>
+        <div class="panel"><h3>Modelos más patentados <span class="hint">tocá para buscar</span></h3><div id="modelos" class="bars"></div></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="grid">
+        <div class="panel"><h3>Provincia del registro <span class="hint">tocá para filtrar</span></h3><div id="provs" class="bars"></div></div>
+        <div class="panel"><h3>Quién los patenta</h3><div id="titulares"></div></div>
+      </div>
+    </section>
+
+    <section id="raros" aria-labelledby="h-raros">
+      <div class="sec-h"><h2 id="h-raros">Los más raros</h2><span class="hint">Modelos con pocas unidades dentro de la selección</span></div>
+      <div class="panel">
+        <div class="controls">
+          <label>Hasta <select id="r-max"><option value="1">1 unidad</option><option value="2">2 unidades</option><option value="3">3 unidades</option><option value="5">5 unidades</option><option value="10">10 unidades</option></select></label>
+          <label class="chk"><input type="checkbox" id="r-pass" checked> Solo autos, SUV, pickups y utilitarios</label>
+        </div>
+        <p class="lead" id="r-sum"></p>
+        <div class="two">
+          <div><h3>Cuántos modelos hay según sus unidades</h3><div id="r-hist" class="bars"></div></div>
+          <div><p class="note" style="margin-top:0">Cada modelo se cuenta con su primera palabra (Hilux, Cronos, Corvette). Las versiones se agrupan dentro del modelo. Los trámites sin marca se dejan afuera.</p></div>
+        </div>
+        <div class="tw"><table id="r-tab"></table></div>
+        <button class="btn more-btn" id="r-more" type="button" hidden>Mostrar más</button>
+      </div>
+    </section>
+
+    <section id="exoticos" aria-labelledby="h-exo">
+      <div class="sec-h"><h2 id="h-exo">Superdeportivos y exóticos</h2><span class="hint">Lista editable en data/exoticos.json</span></div>
+      <div class="panel">
+        <div class="kv" id="x-sum"></div>
+        <div class="two" style="margin-top:12px">
+          <div><h3>Por marca en la selección</h3><div id="x-marcas" class="bars"></div></div>
+          <div><h3>Marcas exóticas por mes <span class="hint">solo marcas, sin modelos sueltos</span></h3><div id="x-serie"></div></div>
+        </div>
+        <div class="tw"><table id="x-tab"></table></div>
+        <button class="btn more-btn" id="x-more" type="button" hidden>Mostrar más</button>
+      </div>
+    </section>
+
+    <section id="clasicos" aria-labelledby="h-cla">
+      <div class="sec-h"><h2 id="h-cla">Clásicos y autos antiguos</h2><span class="hint">Antigüedad = año del patentamiento menos año modelo</span></div>
+      <div class="panel">
+        <div class="controls">
+          <label>Mostrar <select id="c-edad"><option value="30">30 años o más (y trámite de auto clásico)</option><option value="20">20 años o más</option><option value="10">10 años o más</option></select></label>
+        </div>
+        <div class="two" style="margin-top:12px">
+          <div><h3>Por década del año modelo</h3><div id="c-dec" class="bars"></div></div>
+          <div><div id="c-sum"></div><h3 style="margin-top:12px">Modelos más repetidos</h3><div id="c-top" class="bars"></div></div>
+        </div>
+        <div class="tw"><table id="c-tab"></table></div>
+        <button class="btn more-btn" id="c-more" type="button" hidden>Mostrar más</button>
+      </div>
+    </section>
+
+    <section id="electricos" aria-labelledby="h-ev">
+      <div class="sec-h"><h2 id="h-ev">Híbridos y eléctricos</h2><span class="hint">Estimado a partir del nombre del modelo</span></div>
+      <div class="panel">
+        <div id="e-sum"></div>
+        <h3 style="margin-top:14px">Modelos electrificados más patentados</h3><div id="e-top" class="bars"></div>
+        <p class="note">El registro no informa el tipo de motor. Se detecta por palabras como HEV, PHEV, híbrido o eléctrico en el nombre, y todo lo de BYD se cuenta como electrificado. Puede quedar algún modelo sin detectar.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Los números son vehículos, no filas del archivo. Un auto con dos titulares aparece en dos filas, así que cada fila se pesa por su porcentaje de titularidad. Son patentamientos iniciales: autos que se registraron por primera vez en ese mes. No es el parque automotor total, y un auto patentado antes del primer mes cargado no entra. Los precios de Mercado Libre que ves al tocar un enlace son los de hoy, no los del mes en que se patentó. Fuente: DNRPA, datos abiertos. Este sitio no está afiliado al DNRPA ni a Mercado Libre.</p>
+  </footer>
+</div>
+<div id="tip" role="tooltip"></div>
+<script src="app.js" defer></script>
+</body>
+</html>

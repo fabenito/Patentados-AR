@@ -1,0 +1,649 @@
+(function () {
+'use strict';
+
+/* ---------- utilidades ---------- */
+const $ = s => document.querySelector(s);
+const nfmt = new Intl.NumberFormat('es-AR', { useGrouping: 'always', maximumFractionDigits: 0 });
+const f0 = x => nfmt.format(Math.round(x));
+const pc = x => (!isFinite(x) ? '–' : x > 0 && x < 0.001 ? '<0,1%' : (x * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + '%');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const slug = s => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const SMALL = new Set(['CON', 'SIN', 'DE', 'DEL', 'LA', 'EL', 'Y', 'PARA', 'POR', 'LOS', 'LAS']);
+const tc = s => String(s).split(' ').map(w => (/\d/.test(w) || (w.length <= 3 && !SMALL.has(w)) || /^[^A-Za-zÁÉÍÓÚÑ]/.test(w)) ? w : w[0] + w.slice(1).toLowerCase()).join(' ');
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const MC = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const DOW = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const mLabel = m => MESES[+m.slice(5) - 1] + ' ' + m.slice(0, 4);
+const mShort = m => MC[+m.slice(5) - 1] + ' ' + m.slice(2, 4);
+const AGE = ['Menos de 25', '25 a 34', '35 a 44', '45 a 54', '55 a 64', '65 o más'];
+const AGE_MID = [21, 29.5, 39.5, 49.5, 59.5, 70];
+const EV_LABEL = ['Combustión', 'Híbrido suave', 'Híbrido', 'Híbrido enchufable', 'Eléctrico'];
+const ORIG_COL = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)'];
+const NOPASS = /CAMION|SEMIRREMOLQUE|REMOLQUE|ACOPLADO|TRACTOR|CHASIS|CARRETON|BATEA|OMNIBUS|MINIBUS|COLECTIVO|BOMBEROS|CISTERNA|VOLCADOR|CASA RODANTE|TRAILER|MAQUINA|AMBULANCIA|AUTOBOMBA|HORMIGONERO|GRUA|PLATAFORMA|ARTICULAD|EQUIPO/;
+const SINDATO = /^SIN (ESPECIFICACION|MARCA|DATO)/;
+
+/* ---------- estado ---------- */
+const st = { period: '', months: [], origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, q: '', ifam: -1, token: 0 };
+let IX = null, CFG = { grupos: [], serie: [] };
+let sel = [], selP = [];
+const MD = new Map();
+const G = {
+  marca: [], marcaM: new Map(), fam: [], famM: new Map(), famBrand: [], famName: [],
+  ver: [], verM: new Map(), verFam: [], verTxt: [], verEx: [], verEv: [], verSearch: [],
+  tipo: [], tipoM: new Map(), tipoPass: [], prov: [], provM: new Map(),
+  orig: ['Nacional', 'Importado', 'Protocolo 21'], origM: new Map([['Nacional', 0], ['Importado', 1], ['Protocolo 21', 2]]),
+};
+function gid(arr, map, key, onNew) {
+  let i = map.get(key);
+  if (i === undefined) { i = arr.length; arr.push(key); map.set(key, i); if (onNew) onNew(i); }
+  return i;
+}
+
+/* ---------- clasificación por nombre ---------- */
+function exGroup(b, t) {
+  for (let g = 0; g < CFG.grupos.length; g++) {
+    const gr = CFG.grupos[g];
+    if (gr.marcas.includes(b)) return g;
+    for (const m of gr.mod) if (m.marca === b && m.re.test(t)) return g;
+  }
+  return -1;
+}
+function evCat(b, t) {
+  if (/PHEV|DM-?[IPO]\b|PLUG-?IN|ENCHUFABLE/.test(t)) return 3;
+  if (/MHEV|MILD/.test(t)) return 1;
+  if (/\bHEV\b|HIBRID|HYBRID/.test(t)) return 2;
+  if (/\bBEV\b|\bEV\b|ELECTRIC|E-TRON/.test(t) || b === 'BYD') return 4;
+  return 0;
+}
+
+/* ---------- carga de datos ---------- */
+async function getMonthJSON(file) {
+  const r = await fetch('data/' + file);
+  if (!r.ok) throw new Error(file + ' ' + r.status);
+  let bytes = new Uint8Array(await r.arrayBuffer());
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('sin DecompressionStream');
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function addMonth(d) {
+  const r = d.r, n = r.w.length;
+  const mb = d.marca.map(x => gid(G.marca, G.marcaM, x));
+  const mf = d.fam.map(([b, name]) => {
+    const bi = mb[b];
+    return gid(G.fam, G.famM, bi + '|' + name, i => { G.famBrand[i] = bi; G.famName[i] = name; });
+  });
+  const mv = d.ver.map(([f, txt]) => {
+    const fi = mf[f];
+    return gid(G.ver, G.verM, fi + '|' + txt, i => {
+      const b = G.marca[G.famBrand[fi]];
+      G.verFam[i] = fi; G.verTxt[i] = txt;
+      G.verEx[i] = exGroup(b, txt); G.verEv[i] = evCat(b, txt);
+      G.verSearch[i] = norm(b + ' ' + txt);
+    });
+  });
+  const mt = d.tipo.map(x => gid(G.tipo, G.tipoM, x, i => { G.tipoPass[i] = !NOPASS.test(x); }));
+  const mp = d.prov.map(x => gid(G.prov, G.provM, x));
+  const mo = d.orig.map(x => gid(G.orig, G.origM, x));
+  const M = {
+    m: d.m, year: +d.m.slice(0, 4), n,
+    o: new Uint8Array(n), y: new Uint16Array(n), t: new Uint16Array(n), v: new Int32Array(n), p: new Uint16Array(n),
+    pe: new Uint8Array(n), g: new Uint8Array(n), a: new Int8Array(n), d: new Uint8Array(n), tr: new Uint8Array(n),
+    w: new Uint8Array(n), f: new Int32Array(n), b: new Int16Array(n), all: new Int32Array(n),
+  };
+  for (let i = 0; i < n; i++) {
+    const v = mv[r.v[i]];
+    M.o[i] = mo[r.o[i]]; M.y[i] = r.y[i]; M.t[i] = mt[r.t[i]]; M.v[i] = v; M.p[i] = mp[r.p[i]];
+    M.pe[i] = r.pe[i]; M.g[i] = r.g[i]; M.a[i] = r.a[i]; M.d[i] = r.d[i]; M.tr[i] = r.tr[i]; M.w[i] = r.w[i];
+    M.f[i] = G.verFam[v]; M.b[i] = G.famBrand[M.f[i]]; M.all[i] = i;
+  }
+  MD.set(d.m, M);
+}
+
+function status(t) { $('#estado').textContent = t || ''; }
+async function loadMonths(need, tok) {
+  let k = 0, done = 0;
+  async function worker() {
+    while (k < need.length) {
+      const m = need[k++];
+      const d = await getMonthJSON(IX.months[IX.pos.get(m)].file);
+      addMonth(d);
+      done++; status(`Cargando datos… ${done} de ${need.length}`);
+    }
+  }
+  status(`Cargando datos… 0 de ${need.length}`);
+  await Promise.all(Array.from({ length: Math.min(5, need.length) }, worker));
+  status('');
+}
+
+/* ---------- selección de filas ---------- */
+function verMatch(q) {
+  const toks = norm(q).split(/\s+/).filter(Boolean), ok = new Uint8Array(G.ver.length);
+  for (let v = 0; v < ok.length; v++) ok[v] = toks.every(t => G.verSearch[v].includes(t)) ? 1 : 0;
+  return ok;
+}
+function buildSel(months, filt) {
+  const out = [];
+  const vOk = filt && st.q ? verMatch(st.q) : null;
+  const oOn = new Uint8Array(G.orig.length);
+  G.orig.forEach((nm, i) => { oOn[i] = st.origOff.has(nm) ? 0 : 1; });
+  for (const m of months) {
+    const M = MD.get(m); if (!M) continue;
+    if (!filt) { out.push({ M, idx: M.all }); continue; }
+    const n = M.n, idx = new Int32Array(n), Y = M.year; let c = 0;
+    for (let i = 0; i < n; i++) {
+      if (!oOn[M.o[i]]) continue;
+      if (st.brand >= 0 && M.b[i] !== st.brand) continue;
+      if (st.tipo >= 0 && M.t[i] !== st.tipo) continue;
+      if (st.prov >= 0 && M.p[i] !== st.prov) continue;
+      if (st.pe >= 0 && M.pe[i] !== st.pe) continue;
+      if (st.era !== 'all') {
+        const a = Y - M.y[i];
+        if (st.era === 'new' && a > 1) continue;
+        if (st.era === 'old' && a < 2) continue;
+        if (st.era === 'classic' && a < 30 && M.tr[i] !== 4) continue;
+      }
+      if (vOk && !vOk[M.v[i]]) continue;
+      idx[c++] = i;
+    }
+    out.push({ M, idx: idx.subarray(0, c) });
+  }
+  return out;
+}
+function tally(s, key, size) {
+  const out = new Float64Array(size);
+  for (const { M, idx } of s) { const A = M[key], W = M.w; for (let k = 0; k < idx.length; k++) { const i = idx[k]; out[A[i]] += W[i]; } }
+  for (let j = 0; j < size; j++) out[j] /= 100;
+  return out;
+}
+function count(s) { let t = 0; for (const { M, idx } of s) for (let k = 0; k < idx.length; k++) t += M.w[idx[k]]; return t / 100; }
+function ranked(vals, limit) {
+  const a = []; for (let i = 0; i < vals.length; i++) if (vals[i] > 0) a.push([i, vals[i]]);
+  a.sort((x, y) => y[1] - x[1]); return limit ? a.slice(0, limit) : a;
+}
+function ownerStats(s) {
+  const o = { pj: 0, pf: 0, age: new Float64Array(6), gen: new Float64Array(3) };
+  for (const { M, idx } of s) for (let k = 0; k < idx.length; k++) {
+    const i = idx[k], w = M.w[i] / 100;
+    if (M.pe[i]) o.pj += w; else { o.pf += w; o.gen[M.g[i]] += w; const a = M.a[i]; if (a >= 0) o.age[a] += w; }
+  }
+  return o;
+}
+
+/* ---------- etiquetas y enlaces ---------- */
+const verLabel = v => { const b = G.marca[G.famBrand[G.verFam[v]]], t = G.verTxt[v]; return t.startsWith(b) ? tc(t) : tc(b) + ' ' + tc(t); };
+const famLabel = f => tc(G.marca[G.famBrand[f]]) + ' ' + tc(G.famName[f]);
+function mlLink(label, year, regYear, text) {
+  const q = regYear - year <= 1 ? label + ' 0km' : label + ' ' + year;
+  return `<a href="https://listado.mercadolibre.com.ar/${slug(q)}" target="_blank" rel="noopener">${text || 'Ver precios'}</a>`;
+}
+
+/* ---------- gráficos ---------- */
+const tip = $('#tip');
+document.addEventListener('mousemove', e => {
+  const t = e.target.closest && e.target.closest('[data-tip]');
+  if (!t) { tip.style.opacity = 0; return; }
+  tip.textContent = t.getAttribute('data-tip'); tip.style.opacity = 1;
+  tip.style.left = Math.max(8, Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8)) + 'px';
+  tip.style.top = Math.min(e.clientY + 16, innerHeight - tip.offsetHeight - 8) + 'px';
+});
+document.addEventListener('scroll', () => { tip.style.opacity = 0; }, true);
+
+function bars(el, items, opts) {
+  opts = opts || {};
+  const max = Math.max(1, ...items.map(x => x.v));
+  el.innerHTML = items.map((x, k) => {
+    const tag = x.click ? 'button' : 'div';
+    return `<${tag} class="brow${x.on ? ' on' : ''}" ${x.click ? `type="button" data-k="${k}"` : ''} data-tip="${esc(x.tip || x.label + ': ' + f0(x.v))}"><span class="lab">${esc(x.label)}</span><span class="trk"><i style="width:${(x.v / max * 100).toFixed(1)}%${x.color ? ';background:' + x.color : ''}"></i></span><span class="val num">${f0(x.v)}</span></${tag}>`;
+  }).join('') || '<div class="more">No hay datos con la selección actual.</div>';
+  el.querySelectorAll('button.brow').forEach(b => { b.onclick = () => items[+b.dataset.k].click(); });
+}
+function niceMax(m) {
+  const raw = m / 4, p = Math.max(1, Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1)))));
+  const steps = p >= 10 ? [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10] : [1, 2, 3, 4, 5, 6, 8, 10];
+  for (const k of steps) if (k * p >= raw) return k * p * 4;
+  return 40 * p;
+}
+
+/* o: { cats, series:[{color,v[]}], tip(i), tick(i), sel:Set, missing:[], alpha(i), pick(i), h, label } */
+function chart(el, o) {
+  const W = Math.max(280, el.clientWidth || 600), H = o.h || 200, l = 46, r = 6, t = 10, b = 24;
+  const n = o.cats.length, bw = (W - l - r) / n, ph = H - t - b, gap = bw > 8 ? 1.5 : bw > 4 ? 1 : 0.4;
+  const tot = o.cats.map((_, i) => o.series.reduce((a, s) => a + (s.v[i] || 0), 0));
+  const mx = niceMax(Math.max(1, ...tot));
+  let g = '';
+  for (let k = 0; k <= 4; k++) {
+    const y = t + ph - ph * k / 4;
+    g += `<line class="axl" x1="${l}" x2="${W - r}" y1="${y}" y2="${y}"/><text x="${l - 8}" y="${y + 4}" text-anchor="end">${f0(mx * k / 4)}</text>`;
+  }
+  for (let i = 0; i < n; i++) {
+    const x = l + i * bw;
+    if (o.sel && o.sel.has(i)) g += `<rect x="${x.toFixed(1)}" y="${t}" width="${bw.toFixed(1)}" height="${ph}" fill="var(--wash)"/>`;
+    let y = t + ph;
+    o.series.forEach((s, k) => {
+      const v = s.v[i] || 0; if (!v) return;
+      const h = Math.max(1, ph * v / mx); y -= h;
+      g += `<rect x="${(x + gap).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 2 * gap).toFixed(1)}" height="${h.toFixed(1)}" fill="${s.color}"${o.alpha ? ` opacity="${o.alpha(i)}"` : ''}${o.series.length === 1 && bw > 6 ? ' rx="2"' : ''}/>`;
+    });
+    if (o.missing && o.missing[i]) g += `<line x1="${(x + gap).toFixed(1)}" x2="${(x + bw - gap).toFixed(1)}" y1="${t + ph - 1}" y2="${t + ph - 1}" stroke="var(--mute)" stroke-width="2" stroke-dasharray="2 2"/>`;
+    const tk = o.tick ? o.tick(i) : '';
+    if (tk) g += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 7}" text-anchor="middle">${tk}</text>`;
+  }
+  for (let i = 0; i < n; i++) {
+    g += `<rect class="hit" data-i="${i}" x="${(l + i * bw).toFixed(1)}" y="${t}" width="${bw.toFixed(1)}" height="${ph}" fill="transparent" data-tip="${esc(o.tip(i))}"/>`;
+  }
+  el.classList.add('chart'); el.classList.toggle('pick', !!o.pick);
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.label || '')}">${g}</svg>`;
+  if (o.pick) el.querySelectorAll('rect.hit').forEach(rc => { rc.onclick = () => o.pick(+rc.dataset.i); });
+}
+
+/* ---------- listas con "mostrar más" ---------- */
+function makeList(tabSel, btnSel, head, step) {
+  const tab = $(tabSel), btn = $(btnSel); let rows = [], shown = step;
+  function draw() {
+    tab.innerHTML = `<thead><tr>${head.map(h => `<th class="${h.r ? 'r' : ''}">${h.t}</th>`).join('')}</tr></thead><tbody>` +
+      (rows.slice(0, shown).map(r => `<tr>${r.map((c, i) => `<td class="${head[i].cls || ''}">${c}</td>`).join('')}</tr>`).join('') ||
+        `<tr><td colspan="${head.length}" class="vacio">No hay vehículos que coincidan con la selección.</td></tr>`) + '</tbody>';
+    btn.hidden = rows.length <= shown;
+    if (!btn.hidden) btn.textContent = `Mostrar más (${f0(rows.length - shown)} restantes)`;
+  }
+  btn.onclick = () => { shown += step; draw(); };
+  return { set(r) { rows = r; shown = step; draw(); } };
+}
+
+/* ---------- titulares ---------- */
+function ownersHTML(o, minN) {
+  const n = o.pf + o.pj;
+  if (n < minN) return `<p class="note">Los datos de titulares se ocultan cuando hay menos de ${minN} vehículos.</p>`;
+  const gT = o.gen[0] + o.gen[1];
+  return `<div class="kv" style="margin:0 0 12px"><span><b>${pc(o.pj / n)}</b> a nombre de empresas</span><span><b>${pc(o.pf / n)}</b> de personas</span></div>
+  <h3>Personas por edad</h3><div class="bars own-age"></div>
+  <h3 style="margin-top:14px">Personas por género</h3>` + (gT ? `<div class="stack" style="height:22px">${[['Hombres', o.gen[0], 'var(--s1)'], ['Mujeres', o.gen[1], 'var(--s2)']].map(x => `<i style="flex:${x[1]};background:${x[2]}" data-tip="${x[0]}: ${f0(x[1])} (${pc(x[1] / gT)})"></i>`).join('')}</div>
+  <div class="legend"><div><span class="sw" style="background:var(--s1)"></span>Hombres<span class="nn num">${pc(o.gen[0] / gT)}</span></div><div><span class="sw" style="background:var(--s2)"></span>Mujeres<span class="nn num">${pc(o.gen[1] / gT)}</span></div></div>` : '<p class="note">Sin datos.</p>');
+}
+function fillOwners(root, o) {
+  const el = root.querySelector('.own-age');
+  if (el) bars(el, Array.from(o.age, (v, i) => ({ label: AGE[i], v })).filter(x => x.v > 0));
+}
+
+/* ---------- período ---------- */
+function resolve(spec) {
+  const av = IX.avail.map(x => x.m);
+  if (spec.startsWith('m:')) return [spec.slice(2)];
+  if (spec.startsWith('last:')) return av.slice(-(+spec.slice(5)));
+  if (spec.startsWith('y:')) return av.filter(m => m.startsWith(spec.slice(2)));
+  return av;
+}
+function buildPeriodSelect() {
+  const av = IX.avail, mb = ms => ms.reduce((s, m) => s + IX.months[IX.pos.get(m)].bytes, 0) / 1e6;
+  const sz = ms => { const b = mb(ms); return b > 0.3 ? ` (${b.toLocaleString('es-AR', { maximumFractionDigits: 1 })} MB)` : ''; };
+  const years = [...new Set(av.map(x => x.m.slice(0, 4)))].sort().reverse();
+  let h = '<optgroup label="Rangos">';
+  if (av.length > 1) h += `<option value="last:3">Últimos 3 meses${sz(resolve('last:3'))}</option>`;
+  if (av.length > 3) h += `<option value="last:12">Últimos 12 meses${sz(resolve('last:12'))}</option>`;
+  years.forEach(y => { const ms = resolve('y:' + y); if (ms.length > 1) h += `<option value="y:${y}">Año ${y}${ms.length < 12 ? ` (${ms.length} meses)` : ''}${sz(ms)}</option>`; });
+  if (av.length > 1) h += `<option value="all">Todo el período, ${mShort(av[0].m)} a ${mShort(av[av.length - 1].m)}${sz(av.map(x => x.m))}</option>`;
+  h += '</optgroup><optgroup label="Un mes">';
+  av.slice().reverse().forEach(x => { h += `<option value="m:${x.m}">${mLabel(x.m)}</option>`; });
+  $('#f-per').innerHTML = h + '</optgroup>';
+}
+async function setPeriod(spec) {
+  const ms = resolve(spec), tok = ++st.token;
+  st.period = spec; $('#f-per').value = spec;
+  const need = ms.filter(m => !MD.has(m));
+  try { if (need.length) await loadMonths(need, tok); }
+  catch (e) { status('No se pudieron cargar los datos. Probá de nuevo.'); console.error(e); return; }
+  if (tok !== st.token) return;
+  st.months = ms;
+  try { history.replaceState(null, '', ms.length === 1 && spec.startsWith('m:') ? '#' + ms[0] : location.pathname + location.search); } catch (e) { /* ignorar */ }
+  refreshOptions(); update();
+  if (st.ifam >= 0) showFam(st.ifam);
+}
+
+/* ---------- filtros ---------- */
+function fillSel(id, first, opts, cur) {
+  const el = $(id);
+  el.innerHTML = `<option value="-1">${first}</option>` + opts.map(o => `<option value="${o[0]}">${esc(o[1])}</option>`).join('');
+  el.value = String(cur);
+  if (el.value === String(cur)) return cur;
+  el.value = '-1'; return -1;
+}
+function refreshOptions() {
+  selP = buildSel(st.months, false);
+  const b = tally(selP, 'b', G.marca.length), t = tally(selP, 't', G.tipo.length), p = tally(selP, 'p', G.prov.length), o = tally(selP, 'o', G.orig.length);
+  st.brand = fillSel('#f-brand', 'Todas las marcas', ranked(b).map(([i, v]) => [i, `${tc(G.marca[i])} (${f0(v)})`]), st.brand);
+  st.tipo = fillSel('#f-tipo', 'Todas las carrocerías', ranked(t).map(([i, v]) => [i, `${tc(G.tipo[i])} (${f0(v)})`]), st.tipo);
+  st.prov = fillSel('#f-prov', 'Todas las provincias', ranked(p).map(([i, v]) => [i, `${G.prov[i]} (${f0(v)})`]), st.prov);
+  const ec = { all: 0, new: 0, old: 0, classic: 0 };
+  for (const { M, idx } of selP) for (let k = 0; k < idx.length; k++) {
+    const i = idx[k], w = M.w[i] / 100, a = M.year - M.y[i];
+    ec.all += w; if (a <= 1) ec.new += w; else ec.old += w; if (a >= 30 || M.tr[i] === 4) ec.classic += w;
+  }
+  const eras = [['all', 'Todas las antigüedades'], ['new', '0 km y modelo reciente'], ['old', 'Usados e importados antiguos'], ['classic', 'Clásicos, 30 años o más']];
+  $('#f-era').innerHTML = eras.map(e => `<option value="${e[0]}">${e[1]} (${f0(ec[e[0]])})</option>`).join('');
+  $('#f-era').value = st.era;
+  const fo = $('#f-orig'); fo.querySelectorAll('.chip').forEach(c => c.remove());
+  G.orig.forEach((nm, i) => {
+    if (!o[i] && i > 2) return;
+    const bt = document.createElement('button'); bt.type = 'button'; bt.className = 'chip';
+    bt.setAttribute('aria-pressed', st.origOff.has(nm) ? 'false' : 'true');
+    bt.innerHTML = `<span class="dot" style="background:${ORIG_COL[Math.min(i, 3)]}"></span>${esc(nm)}<span class="c num">${f0(o[i])}</span>`;
+    bt.onclick = () => { st.origOff.has(nm) ? st.origOff.delete(nm) : st.origOff.add(nm); bt.setAttribute('aria-pressed', st.origOff.has(nm) ? 'false' : 'true'); update(); };
+    fo.appendChild(bt);
+  });
+}
+$('#f-per').onchange = e => setPeriod(e.target.value);
+$('#f-era').onchange = e => { st.era = e.target.value; update(); };
+$('#f-brand').onchange = e => { st.brand = +e.target.value; update(); };
+$('#f-tipo').onchange = e => { st.tipo = +e.target.value; update(); };
+$('#f-prov').onchange = e => { st.prov = +e.target.value; update(); };
+$('#f-pers').onchange = e => { st.pe = +e.target.value; update(); };
+$('#f-q').oninput = e => { st.q = e.target.value.trim(); update(); };
+$('#reset').onclick = () => {
+  Object.assign(st, { origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, q: '' });
+  $('#f-pers').value = '-1'; $('#f-q').value = ''; refreshOptions(); update();
+};
+const toggle = (k, v, id) => { st[k] = st[k] === v ? -1 : v; $(id).value = st[k]; update(); };
+
+/* ---------- buscador de modelos ---------- */
+function suggest(q) {
+  const toks = norm(q).split(/\s+/).filter(Boolean);
+  const list = [];
+  for (let i = 0; i < IX.fams.length && list.length < 10; i++) if (toks.every(t => IX.famSearch[i].includes(t))) list.push(i);
+  $('#sugg').innerHTML = list.length
+    ? list.map(i => `<button type="button" class="chip" data-f="${i}" aria-pressed="${i === st.ifam}">${esc(tc(IX.brands[IX.fams[i][0]]) + ' ' + tc(IX.fams[i][1]))}<span class="c num">${f0(IX.ftot[i])}</span></button>`).join('')
+    : '<span class="note">No encontré ese modelo. Probá con una parte del nombre.</span>';
+  $('#sugg').querySelectorAll('.chip').forEach(c => { c.onclick = () => showFam(+c.dataset.f); });
+  return list;
+}
+$('#q').oninput = e => suggest(e.target.value);
+$('#q').onkeydown = e => { if (e.key === 'Enter') { const l = suggest(e.target.value); if (l.length) showFam(l[0]); } };
+
+function showFam(ifam) {
+  st.ifam = ifam;
+  const [bi, fname] = IX.fams[ifam], brand = IX.brands[bi], label = tc(brand) + ' ' + tc(fname);
+  const series = IX.fs[ifam], total = IX.ftot[ifam];
+  const selIdx = new Set(st.months.map(m => IX.pos.get(m)));
+  let per = 0; selIdx.forEach(i => { per += series[i]; });
+  let rank = 0, active = 0;
+  { const ids = [...selIdx]; if (per > 0) rank = 1;
+    for (let j = 0; j < IX.fs.length; j++) { let s = 0; const a = IX.fs[j]; for (const i of ids) s += a[i]; if (s > 0) active++; if (per > 0 && j !== ifam && s > per) rank++; } }
+  let nz = 0, best = 0; series.forEach((v, i) => { if (v > 0) nz++; if (v > series[best]) best = i; });
+  const perTxt = st.months.length === 1 ? mLabel(st.months[0]) : `${mShort(st.months[0])} a ${mShort(st.months[st.months.length - 1])}`;
+
+  const sb = G.marcaM.get(brand), sf = sb === undefined ? undefined : G.famM.get(sb + '|' + fname);
+  const rows = [];
+  if (sf !== undefined) for (const { M } of selP) {
+    const idx = new Int32Array(M.n); let c = 0; for (let i = 0; i < M.n; i++) if (M.f[i] === sf) idx[c++] = i;
+    if (c) rows.push({ M, idx: idx.subarray(0, c) });
+  }
+  let detail = '', after = null, y0 = 9999, y1 = 0;
+  const hasRows = rows.length > 0;
+  if (hasRows) {
+    const ve = ranked(tally(rows, 'v', G.ver.length), 8), oc = ranked(tally(rows, 'o', G.orig.length)), pv = ranked(tally(rows, 'p', G.prov.length), 5), ty = ranked(tally(rows, 't', G.tipo.length), 3);
+    const yc = {};
+    rows.forEach(({ M, idx }) => { for (let k = 0; k < idx.length; k++) { const i = idx[k], y = M.y[i]; yc[y] = (yc[y] || 0) + M.w[i] / 100; y0 = Math.min(y0, y); y1 = Math.max(y1, y); } });
+    const ys = Object.keys(yc).sort();
+    detail = `<div class="kv"><span>Año modelo <b>${y0 === y1 ? y0 : y0 + ' a ' + y1}</b>${ys.length > 1 ? ` (${ys.slice(-6).map(y => y + ': ' + f0(yc[y])).join(', ')}${ys.length > 6 ? ', …' : ''})` : ''}</span>
+      <span>Origen <b>${oc.map(([i, c]) => G.orig[i] + ' ' + pc(c / per)).join(', ')}</b></span>
+      <span>Carrocería <b>${ty.map(([i]) => tc(G.tipo[i])).join(', ')}</b></span></div>
+    <div class="two" style="margin-top:18px"><div><h3>Versiones en ${esc(perTxt)}</h3><div class="bars" id="fv"></div></div><div><h3>Provincias principales</h3><div class="bars" id="fp"></div></div></div>
+    <div style="margin-top:18px" id="fo">${ownersHTML(ownerStats(rows), 10)}</div>`;
+    after = () => {
+      bars($('#fv'), ve.map(([i, c]) => ({ label: tc(G.verTxt[i]), v: c, tip: `${verLabel(i)}: ${f0(c)}` })));
+      bars($('#fp'), pv.map(([i, c]) => ({ label: G.prov[i], v: c })));
+      fillOwners($('#fo'), ownerStats(rows));
+    };
+  } else {
+    detail = `<p class="vacio">No hay patentamientos de este modelo en ${esc(perTxt)}. Cambiá el período arriba o tocá una barra del gráfico.</p>`;
+  }
+  const regY = st.months.length ? +st.months[st.months.length - 1].slice(0, 4) : new Date().getFullYear();
+  const recent = hasRows && y1 >= regY - 1;
+  $('#fres').innerHTML = `
+    <div class="big"><div><div class="fam">${esc(label)}</div><div class="l">patentados desde ${mLabel(IX.months[0].m)}</div></div>
+      <div><div class="n num">${f0(total)}</div><div class="l">${IX.avail.length === 1 ? 'en el único mes cargado' : 'en los ' + f0(IX.avail.length) + ' meses cargados'}</div></div>
+      <div><div class="n num">${f0(per)}</div><div class="l">en ${esc(perTxt)}</div></div>
+      <div><div class="n num">${rank ? '#' + f0(rank) : '–'}</div><div class="l">${rank ? 'puesto entre ' + f0(active) + ' modelos patentados en ese período' : 'sin unidades en el período'}</div></div></div>
+    <div class="kv"><span>Mejor mes: <b>${series[best] > 0 ? mLabel(IX.months[best].m) + ' (' + f0(series[best]) + ')' : '–'}</b></span><span>Meses con patentamientos: <b>${f0(nz)} de ${f0(IX.avail.length)}</b></span>
+      <span><a href="https://listado.mercadolibre.com.ar/${slug(label + (recent ? ' 0km' : ''))}" target="_blank" rel="noopener">Ver precios de ${esc(label)} en Mercado Libre</a></span></div>
+    <div id="f-chart" style="margin-top:16px"></div>
+    ${detail}
+    <p class="note">Son patentamientos iniciales en los meses cargados. No es la cantidad que circula hoy: un auto patentado antes de ${esc(mLabel(IX.months[0].m))} no está en estas cuentas. Los precios de Mercado Libre son los de hoy.</p>`;
+  if (after) after();
+  chart($('#f-chart'), {
+    cats: IX.months, series: [{ color: 'var(--s1)', v: series }], sel: selIdx, h: 150, label: 'Patentamientos por mes de ' + label,
+    missing: IX.months.map(x => !x.file),
+    tip: i => `${mLabel(IX.months[i].m)}: ${IX.months[i].file ? f0(series[i]) : 'sin datos cargados'}`,
+    tick: tickFn, pick: i => { if (IX.months[i].file) setPeriod('m:' + IX.months[i].m); },
+  });
+  document.querySelectorAll('#sugg .chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.f === ifam));
+}
+function tickFn(i) {
+  const n = IX.months.length, m = IX.months[i].m;
+  if (n <= 14) return mShort(m);
+  if (n <= 40) return m.endsWith('-01') || m.endsWith('-07') ? mShort(m) : '';
+  return m.endsWith('-01') ? m.slice(0, 4) : '';
+}
+
+/* ---------- evolución mensual ---------- */
+function renderEvo() {
+  const mo = IX.months, selIdx = new Set(st.months.map(m => IX.pos.get(m)));
+  const sv = [0, 1, 2, 3].map(k => mo.map(x => x.o[k] || 0));
+  const names = ['Nacional', 'Importado', 'Protocolo 21', 'Otro'];
+  chart($('#evo'), {
+    cats: mo, series: sv.map((v, k) => ({ color: ORIG_COL[k], v })), sel: selIdx, h: 230, label: 'Patentamientos por mes según origen',
+    missing: mo.map(x => !x.file),
+    tip: i => mo[i].file ? `${mLabel(mo[i].m)}: ${f0(mo[i].n)} (${names.slice(0, 3).map((nm, k) => nm + ' ' + f0(mo[i].o[k])).join(', ')})` : `${mLabel(mo[i].m)}: sin datos cargados`,
+    tick: tickFn, pick: i => { if (mo[i].file) setPeriod('m:' + mo[i].m); },
+  });
+  $('#evo-leg').innerHTML = names.map((nm, k) => (k < 3 || sv[3].some(x => x)) ? `<div><span class="sw" style="background:${ORIG_COL[k]}"></span>${nm}</div>` : '').join('') +
+    (mo.some(x => !x.file) ? '<div><span class="sw" style="background:none;border-bottom:2px dashed var(--mute);height:8px;border-radius:0"></span>Mes sin cargar</div>' : '');
+}
+
+/* ---------- tablero ---------- */
+function renderHint() {
+  const z = st.months, p = [z.length === 1 ? mLabel(z[0]) : `${mLabel(z[0])} a ${mLabel(z[z.length - 1])}`];
+  if (st.origOff.size) p.push('sin ' + [...st.origOff].join(' ni '));
+  if (st.era !== 'all') p.push($('#f-era').selectedOptions[0].textContent.replace(/ \([^)]*\)$/, ''));
+  if (st.brand >= 0) p.push(tc(G.marca[st.brand]));
+  if (st.tipo >= 0) p.push(tc(G.tipo[st.tipo]));
+  if (st.prov >= 0) p.push(G.prov[st.prov]);
+  if (st.pe >= 0) p.push(st.pe ? 'solo empresas' : 'solo personas');
+  if (st.q) p.push('modelo con “' + st.q + '”');
+  $('#sel-hint').textContent = p.join(' · ');
+}
+function renderStats() {
+  const o = tally(sel, 'o', G.orig.length), tot = o.reduce((a, b) => a + b, 0);
+  const br = new Set(), fa = new Set(); let age = 0, ageN = 0;
+  for (const { M, idx } of sel) for (let k = 0; k < idx.length; k++) { const i = idx[k]; br.add(M.b[i]); fa.add(M.f[i]); }
+  const os = ownerStats(sel); os.age.forEach((v, i) => { age += v * AGE_MID[i]; ageN += v; });
+  const imp = tot - o[0];
+  const s = [[f0(tot), 'Vehículos patentados'], [f0(br.size), 'Marcas'], [f0(fa.size), 'Modelos'], [tot ? pc(imp / tot) : '–', 'Importados o Protocolo 21'], [ageN ? Math.round(age / ageN) : '–', 'Edad media del titular (aprox.)']];
+  $('#stats').innerHTML = s.map(x => `<div class="stat"><div class="v num">${x[0]}</div><div class="k">${x[1]}</div></div>`).join('');
+}
+function renderTiempo() {
+  const el = $('#tiempo'), single = st.months.length === 1;
+  $('#h-tiempo').textContent = single ? 'Patentamientos por día' : 'Patentamientos por mes';
+  $('#tiempo-leg').hidden = !single;
+  if (single) {
+    const [y, mo] = st.months[0].split('-').map(Number), nd = new Date(y, mo, 0).getDate(), d = tally(sel, 'd', 32);
+    const vals = []; for (let k = 1; k <= nd; k++) vals.push(d[k]);
+    const best = vals.indexOf(Math.max(...vals));
+    chart(el, {
+      cats: vals, series: [{ color: 'var(--s1)', v: vals }], h: 220, label: 'Patentamientos por día',
+      alpha: i => { const w = new Date(y, mo - 1, i + 1).getDay(); return w === 0 || w === 6 ? 0.4 : 1; },
+      tip: i => `${DOW[new Date(y, mo - 1, i + 1).getDay()]} ${i + 1} de ${MESES[mo - 1]}: ${f0(vals[i])}`,
+      tick: i => (i === 0 || (i + 1) % 5 === 0) ? String(i + 1) : '',
+    });
+    $('#tiempo-hint').textContent = vals.some(v => v > 0) ? `Día más movido: ${best + 1} de ${MESES[mo - 1]}, con ${f0(vals[best])}` : '';
+  } else {
+    const vals = st.months.map(m => count(sel.filter(s => s.M.m === m)));
+    chart(el, {
+      cats: st.months, series: [{ color: 'var(--s1)', v: vals }], h: 220, label: 'Patentamientos por mes',
+      tip: i => `${mLabel(st.months[i])}: ${f0(vals[i])}`, tick: i => st.months.length <= 14 ? mShort(st.months[i]) : st.months[i].endsWith('-01') ? st.months[i].slice(0, 4) : '',
+      pick: i => setPeriod('m:' + st.months[i]),
+    });
+    $('#tiempo-hint').textContent = 'Tocá una barra para ver ese mes';
+  }
+}
+function renderOrigen() {
+  const o = tally(sel, 'o', G.orig.length), tot = o.reduce((a, b) => a + b, 0);
+  if (!tot) { $('#origen').innerHTML = '<div class="more">No hay datos con la selección actual.</div>'; return; }
+  $('#origen').innerHTML = `<div class="stack">${Array.from(o, (v, i) => v ? `<i style="flex:${v};background:${ORIG_COL[Math.min(i, 3)]}" data-tip="${esc(G.orig[i])}: ${f0(v)} (${pc(v / tot)})"></i>` : '').join('')}</div>
+  <div class="legend">${Array.from(o, (v, i) => v ? `<div><span class="sw" style="background:${ORIG_COL[Math.min(i, 3)]}"></span>${esc(G.orig[i])}<span class="nn num">${f0(v)} · ${pc(v / tot)}</span></div>` : '').join('')}</div>
+  <p class="note">Nacional es lo fabricado en Argentina. Importado y Protocolo 21 son categorías de importación del registro.</p>`;
+}
+function renderListas() {
+  const tot = count(sel) || 1;
+  bars($('#tipo'), ranked(tally(sel, 't', G.tipo.length), 9).map(([i, v]) => ({ label: tc(G.tipo[i]), v, tip: `${tc(G.tipo[i])}: ${f0(v)} (${pc(v / tot)})`, click: () => toggle('tipo', i, '#f-tipo'), on: st.tipo === i })));
+  bars($('#marcas'), ranked(tally(sel, 'b', G.marca.length), 12).map(([i, v]) => ({ label: tc(G.marca[i]), v, tip: `${tc(G.marca[i])}: ${f0(v)} (${pc(v / tot)})`, click: () => toggle('brand', i, '#f-brand'), on: st.brand === i })));
+  bars($('#modelos'), ranked(tally(sel, 'f', G.fam.length), 12).map(([f, v]) => ({
+    label: famLabel(f), v, tip: `${famLabel(f)}: ${f0(v)} (${pc(v / tot)}). Tocá para ver su historia`,
+    click: () => { const k = IX.famKey.get(G.marca[G.famBrand[f]] + '|' + G.famName[f]); if (k !== undefined) { showFam(k); $('#buscador').scrollIntoView({ behavior: 'smooth' }); } },
+  })));
+  bars($('#provs'), ranked(tally(sel, 'p', G.prov.length), 12).map(([i, v]) => ({ label: G.prov[i], v, tip: `${G.prov[i]}: ${f0(v)} (${pc(v / tot)})`, click: () => toggle('prov', i, '#f-prov'), on: st.prov === i })));
+  const os = ownerStats(sel), el = $('#titulares'); el.innerHTML = ownersHTML(os, 10); fillOwners(el, os);
+}
+
+/* ---------- los más raros ---------- */
+const rareList = makeList('#r-tab', '#r-more', [{ t: 'Marca y modelo' }, { t: 'Unidades', r: true, cls: 'r num' }, { t: 'Año modelo', cls: 'yr' }, { t: 'Origen' }, { t: 'Provincia' }, { t: 'Precios' }], 40);
+function renderRaros() {
+  const N = +$('#r-max').value, pass = $('#r-pass').checked, nf = G.fam.length;
+  const ft = new Float64Array(nf);
+  for (const { M, idx } of sel) for (let k = 0; k < idx.length; k++) {
+    const i = idx[k]; if (pass && !G.tipoPass[M.t[i]]) continue;
+    if (SINDATO.test(G.marca[M.b[i]])) continue;
+    ft[M.f[i]] += M.w[i] / 100;
+  }
+  let nm = 0, rare = 0; const hist = [0, 0, 0, 0, 0, 0, 0];
+  const cut = [1, 2, 5, 10, 50, 200];
+  for (let f = 0; f < nf; f++) { const c = ft[f]; if (c <= 0) continue; nm++; if (c <= N) rare++; let b = 0; while (b < cut.length && c > cut[b]) b++; hist[b]++; }
+  const hl = ['1 unidad', '2 unidades', '3 a 5', '6 a 10', '11 a 50', '51 a 200', 'Más de 200'];
+  bars($('#r-hist'), hl.map((l, i) => ({ label: l, v: hist[i], tip: `${l}: ${f0(hist[i])} modelos` })));
+  $('#r-sum').innerHTML = nm ? `<b>${f0(rare)}</b> de <b>${f0(nm)}</b> modelos (${pc(rare / nm)}) tuvieron ${N === 1 ? 'una sola unidad' : 'hasta ' + N + ' unidades'} en la selección.` : 'No hay datos con la selección actual.';
+  const info = new Map();
+  for (const { M, idx } of sel) for (let k = 0; k < idx.length; k++) {
+    const i = idx[k], f = M.f[i], c = ft[f]; if (c <= 0 || c > N) continue;
+    if (pass && !G.tipoPass[M.t[i]]) continue;
+    let r = info.get(f); if (!r) { r = { f, units: c, v: M.v[i], y0: 9999, y1: 0, o: new Set(), p: new Set(), regY: M.year }; info.set(f, r); }
+    r.y0 = Math.min(r.y0, M.y[i]); r.y1 = Math.max(r.y1, M.y[i]); r.o.add(G.orig[M.o[i]]); r.p.add(G.prov[M.p[i]]); r.regY = Math.max(r.regY, M.year);
+  }
+  const arr = [...info.values()].sort((a, b) => a.units - b.units || a.y0 - b.y0 || G.famName[a.f].localeCompare(G.famName[b.f])).slice(0, 1500);
+  rareList.set(arr.map(r => {
+    const label = r.units <= 1 ? verLabel(r.v) : famLabel(r.f), p = [...r.p];
+    return [esc(label), f0(r.units), r.y0 === r.y1 ? r.y0 : r.y0 + ' a ' + r.y1, esc([...r.o].join(', ')), esc(p.slice(0, 2).join(', ') + (p.length > 2 ? ' y ' + (p.length - 2) + ' más' : '')), mlLink(label, r.y1, r.regY)];
+  }));
+}
+$('#r-max').onchange = renderRaros; $('#r-pass').onchange = renderRaros;
+
+/* ---------- superdeportivos y exóticos ---------- */
+const exoList = makeList('#x-tab', '#x-more', [{ t: 'Grupo' }, { t: 'Marca y modelo' }, { t: 'Año modelo', cls: 'yr' }, { t: 'Origen' }, { t: 'Provincia' }, { t: 'Precios' }], 40);
+function renderExoticos() {
+  const gs = CFG.grupos, refs = [], gc = gs.map(() => 0);
+  for (const { M, idx } of sel) for (let k = 0; k < idx.length; k++) {
+    const i = idx[k], g = G.verEx[M.v[i]]; if (g < 0) continue;
+    refs.push({ M, i, g }); gc[g] += M.w[i] / 100;
+  }
+  const tot = gc.reduce((a, b) => a + b, 0);
+  $('#x-sum').innerHTML = gs.length ? `<span><b>${f0(tot)}</b> vehículos en la selección</span>` + gs.map((g, k) => `<span>${esc(g.nombre)}: <b>${f0(gc[k])}</b></span>`).join('') : '<span>No se pudo leer data/exoticos.json.</span>';
+  const bc = new Map(); refs.forEach(r => { const b = G.marca[M_b(r)]; bc.set(b, (bc.get(b) || 0) + r.M.w[r.i] / 100); });
+  bars($('#x-marcas'), [...bc.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([b, v]) => ({ label: tc(b), v })));
+  const sb = (CFG.serie || []).map(n => IX.brands.indexOf(n)).filter(i => i >= 0);
+  const vals = IX.months.map((_, i) => sb.reduce((s, b) => s + (IX.bs[b][i] || 0), 0));
+  const selIdx = new Set(st.months.map(m => IX.pos.get(m)));
+  chart($('#x-serie'), { cats: IX.months, series: [{ color: 'var(--s2)', v: vals }], sel: selIdx, h: 150, label: 'Marcas exóticas por mes', missing: IX.months.map(x => !x.file), tip: i => `${mLabel(IX.months[i].m)}: ${IX.months[i].file ? f0(vals[i]) : 'sin datos cargados'}`, tick: tickFn, pick: i => { if (IX.months[i].file) setPeriod('m:' + IX.months[i].m); } });
+  refs.sort((a, b) => a.g - b.g || G.marca[M_b(a)].localeCompare(G.marca[M_b(b)]) || G.verTxt[a.M.v[a.i]].localeCompare(G.verTxt[b.M.v[b.i]]));
+  exoList.set(refs.slice(0, 1500).map(({ M, i, g }) => {
+    const v = M.v[i], lab = verLabel(v);
+    return [`<span class="tag">${esc(gs[g].nombre)}</span>`, esc(lab), M.y[i], esc(G.orig[M.o[i]]), esc(G.prov[M.p[i]]), mlLink(lab, M.y[i], M.year)];
+  }));
+}
+const M_b = r => r.M.b[r.i];
+
+/* ---------- clásicos ---------- */
+const claList = makeList('#c-tab', '#c-more', [{ t: 'Año modelo', cls: 'yr' }, { t: 'Marca y modelo' }, { t: 'Carrocería' }, { t: 'Origen' }, { t: 'Provincia' }, { t: 'Trámite' }, { t: 'Precios' }], 40);
+const TRAM = ['Nacional', 'Importado', 'Por dictamen u oficio', 'Formulario 05', 'Auto clásico'];
+function renderClasicos() {
+  const minAge = +$('#c-edad').value, refs = [], dec = {}; let tot = 0, imp = 0;
+  const fc = new Float64Array(G.fam.length);
+  for (const { M, idx } of sel) for (let k = 0; k < idx.length; k++) {
+    const i = idx[k], a = M.year - M.y[i];
+    if (!(a >= minAge || (minAge === 30 && M.tr[i] === 4))) continue;
+    const w = M.w[i] / 100, y = M.y[i], key = y < 1960 ? 'Antes de 1960' : Math.floor(y / 10) * 10 + 's';
+    dec[key] = (dec[key] || 0) + w; tot += w; if (M.o[i] !== 0) imp += w; fc[M.f[i]] += w;
+    refs.push({ M, i });
+  }
+  const order = ['Antes de 1960', '1960s', '1970s', '1980s', '1990s', '2000s', '2010s'];
+  bars($('#c-dec'), order.filter(k => dec[k]).map(k => ({ label: k, v: dec[k] })));
+  let oldest = 9999; refs.forEach(r => { oldest = Math.min(oldest, r.M.y[r.i]); });
+  $('#c-sum').innerHTML = tot ? `<div class="kv" style="margin:0"><span><b>${f0(tot)}</b> vehículos</span><span><b>${oldest}</b> el año modelo más viejo</span><span><b>${pc(imp / tot)}</b> importados</span></div>` : '<div class="vacio">No hay vehículos tan antiguos en la selección.</div>';
+  bars($('#c-top'), ranked(fc, 6).map(([f, v]) => ({ label: famLabel(f), v })));
+  refs.sort((a, b) => a.M.y[a.i] - b.M.y[b.i] || a.M.v[a.i] - b.M.v[b.i]);
+  claList.set(refs.slice(0, 1500).map(({ M, i }) => {
+    const lab = verLabel(M.v[i]);
+    return [M.y[i], esc(lab), esc(tc(G.tipo[M.t[i]])), esc(G.orig[M.o[i]]), esc(G.prov[M.p[i]]), esc(TRAM[M.tr[i]] || ''), mlLink(lab, M.y[i], M.year)];
+  }));
+}
+$('#c-edad').onchange = renderClasicos;
+
+/* ---------- híbridos y eléctricos ---------- */
+function renderElectricos() {
+  const cat = new Float64Array(5), fc = new Float64Array(G.fam.length);
+  for (const { M, idx } of sel) for (let k = 0; k < idx.length; k++) {
+    const i = idx[k], c = G.verEv[M.v[i]], w = M.w[i] / 100; cat[c] += w; if (c > 0) fc[M.f[i]] += w;
+  }
+  const tot = cat.reduce((a, b) => a + b, 0), ele = tot - cat[0];
+  const col = ['var(--s4)', 'var(--s3)', 'var(--s1)', 'var(--s2)', 'var(--ink)'];
+  $('#e-sum').innerHTML = tot ? `<div class="lead"><b>${pc(ele / tot)}</b> de la selección (${f0(ele)} de ${f0(tot)} vehículos) tiene algún grado de electrificación.</div>
+    <div class="stack">${Array.from(cat, (v, i) => v ? `<i style="flex:${v};background:${col[i]}" data-tip="${EV_LABEL[i]}: ${f0(v)} (${pc(v / tot)})"></i>` : '').join('')}</div>
+    <div class="legend row-legend">${Array.from(cat, (v, i) => `<div><span class="sw" style="background:${col[i]}"></span>${EV_LABEL[i]}<span class="nn num">${f0(v)}</span></div>`).join('')}</div>` : '<div class="vacio">No hay datos con la selección actual.</div>';
+  const top = ranked(fc, 10), set = new Map(top.map(([f]) => [f, new Float64Array(5)]));
+  for (const { M, idx } of sel) for (let k = 0; k < idx.length; k++) { const i = idx[k], a = set.get(M.f[i]); if (a) a[G.verEv[M.v[i]]] += M.w[i] / 100; }
+  bars($('#e-top'), top.map(([f, v]) => {
+    const a = set.get(f), parts = [...a].map((x, i) => x > 0 && i > 0 ? EV_LABEL[i] + ' ' + f0(x) : '').filter(Boolean).join(', ');
+    return { label: famLabel(f), v, tip: `${famLabel(f)}: ${parts}` };
+  }));
+}
+
+/* ---------- ciclo principal ---------- */
+function update() {
+  sel = buildSel(st.months, true);
+  renderHint(); renderStats(); renderTiempo(); renderOrigen(); renderListas(); renderRaros(); renderExoticos(); renderClasicos(); renderElectricos();
+  renderEvo();
+}
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (IX && st.months.length) { renderTiempo(); renderEvo(); renderExoticos(); if (st.ifam >= 0) showFam(st.ifam); } }, 150); });
+
+/* ---------- arranque ---------- */
+async function init() {
+  try {
+    const [ix, cfg] = await Promise.all([
+      fetch('data/index.json').then(r => { if (!r.ok) throw new Error('index ' + r.status); return r.json(); }),
+      fetch('data/exoticos.json').then(r => r.ok ? r.json() : { grupos: [], serie: [] }).catch(() => ({ grupos: [], serie: [] })),
+    ]);
+    IX = ix; CFG = cfg;
+  } catch (e) {
+    $('#cobertura').textContent = 'Todavía no hay datos cargados. Corré tools/build.py con los CSV (ver README).';
+    console.error(e); return;
+  }
+  CFG.grupos.forEach(g => { g.mod = (g.modelos || []).map(m => ({ marca: m.marca, re: new RegExp(m.patron, 'i') })); });
+  IX.months.forEach((x, i) => { x.i = i; });
+  IX.pos = new Map(IX.months.map((x, i) => [x.m, i]));
+  IX.avail = IX.months.filter(x => x.file);
+  IX.famKey = new Map(IX.fams.map((f, i) => [IX.brands[f[0]] + '|' + f[1], i]));
+  IX.famSearch = IX.fams.map(f => norm(IX.brands[f[0]] + ' ' + f[1]));
+  IX.ftot = IX.fs.map(a => a.reduce((s, x) => s + x, 0));
+  const a = IX.avail[0].m, z = IX.avail[IX.avail.length - 1].m;
+  $('#cobertura').textContent = `Datos cargados: desde ${IX.avail.length === 1 ? mLabel(a) : `${mLabel(a)} a ${mLabel(z)}`} (${IX.avail.length} meses). Fuente: DNRPA, datos abiertos`;
+  buildPeriodSelect();
+  const h = location.hash.slice(1);
+  const start = /^\d{4}-\d{2}$/.test(h) && IX.pos.has(h) && IX.months[IX.pos.get(h)].file ? 'm:' + h : 'm:' + z;
+  suggest('');
+  await setPeriod(start);
+  showFam(0);
+}
+init();
+})();

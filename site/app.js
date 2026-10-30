@@ -24,7 +24,7 @@ const NOPASS = /CAMION|SEMIRREMOLQUE|REMOLQUE|ACOPLADO|TRACTOR|CHASIS|CARRETON|B
 const SINDATO = /^SIN (ESPECIFICACION|MARCA|DATO)/;
 
 /* ---------- estado ---------- */
-const st = { period: '', months: [], origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, ev: -1, q: '', ifam: -1, upre: -1, followModel: false, uGran: '', token: 0 };
+const st = { period: '', months: [], origOff: new Set(), era: 'all', brand: -1, tipo: -1, prov: -1, pe: -1, ev: -1, q: '', ifam: -1, upre: -1, followModel: false, uGran: '', bGran: '', rGran: '', token: 0 };
 let IX = null, CFG = { grupos: [], serie: [] }, U = null, uPick = -1, MAPA = null;
 let sel = [], selP = [];
 const MD = new Map();
@@ -1001,7 +1001,7 @@ function usadosSpan(brand, fname) {
   const ids = transferIds();
   const n = sumAt(U.fs[i], ids), pj = sumAt(U.fpj[i], ids), to = sumAt(U.fto[i], ids), fr = sumAt(U.ffr[i], ids);
   if (!n) return '';
-  return `<span>Transferencias en el período <b>${f0(n)}</b> · primer dueño empresa ${pc(pj / n)} · hacia comerciante ${pc(to / n)} · desde comerciante ${pc(fr / n)}</span>`;
+  return `<span>Transferencias en el período <b>${f0(n)}</b> · nuevo dueño empresa ${pc(pj / n)} · hacia comerciante ${pc(to / n)} · desde comerciante ${pc(fr / n)}</span>`;
 }
 function flujoHTML(el, partes) {
   const tot = partes.reduce((s, p) => s + p.v, 0);
@@ -1051,7 +1051,7 @@ function semanasTransfer(days) {
 }
 function volumenLegend() {
   const el = $('#u-mes-leg');
-  if (el) el.innerHTML = '<div><span class="sw" style="background:var(--s1)"></span>Primer dueño persona</div><div><span class="sw" style="background:var(--s2)"></span>Primer dueño empresa</div>';
+  if (el) el.innerHTML = '<div><span class="sw" style="background:var(--s1)"></span>Nuevo dueño persona</div><div><span class="sw" style="background:var(--s2)"></span>Nuevo dueño empresa</div>';
 }
 function renderVolumen(ids) {
   const g = (st.uGran || (ids.length === 1 ? 'w' : 'm'));
@@ -1062,7 +1062,7 @@ function renderVolumen(ids) {
   if (g === 'm' || !U.nd) {
     chart($('#u-mes'), {
       cats: ids, series: serie(ids.map(i => U.n[i]), ids.map(i => U.pj[i])), h: 180, label: 'Transferencias por mes',
-      tip: k => `${mLabel(U.months[ids[k]])}: ${f0(U.n[ids[k]])} transferencias, ${f0(U.pj[ids[k]])} con primer dueño empresa`,
+      tip: k => `${mLabel(U.months[ids[k]])}: ${f0(U.n[ids[k]])} transferencias, ${f0(U.pj[ids[k]])} con nuevo dueño empresa`,
       tick: k => ids.length <= 14 ? mShort(U.months[ids[k]]) : U.months[ids[k]].endsWith('-01') ? U.months[ids[k]].slice(0, 4) : '',
     });
     volumenLegend();
@@ -1073,7 +1073,7 @@ function renderVolumen(ids) {
     chart($('#u-mes'), {
       cats: days, series: serie(days.map(x => x.n), days.map(x => x.pj)), h: 180, label: 'Transferencias por día',
       alpha: k => { const w = days[k].dt.getDay(); return w === 0 || w === 6 ? 0.4 : 1; },
-      tip: k => `${DOW[days[k].dt.getDay()]} ${days[k].d} de ${MESES[days[k].m - 1]} de ${days[k].y}: ${f0(days[k].n)} transferencias, ${f0(days[k].pj)} con primer dueño empresa`,
+      tip: k => `${DOW[days[k].dt.getDay()]} ${days[k].d} de ${MESES[days[k].m - 1]} de ${days[k].y}: ${f0(days[k].n)} transferencias, ${f0(days[k].pj)} con nuevo dueño empresa`,
       tick: k => days.length <= 45 ? ((days[k].d === 1 || days[k].d % 5 === 0) ? String(days[k].d) : '') : (days[k].d === 1 ? MC[days[k].m - 1] + ' ' + String(days[k].y).slice(2) : ''),
     });
     volumenLegend();
@@ -1082,7 +1082,7 @@ function renderVolumen(ids) {
   const weeks = semanasTransfer(days);
   chart($('#u-mes'), {
     cats: weeks, series: serie(weeks.map(x => x.n), weeks.map(x => x.pj)), h: 180, label: 'Transferencias por semana',
-    tip: k => `Semana del ${rangoDias(weeks[k].start, weeks[k].end)}: ${f0(weeks[k].n)} transferencias, ${f0(weeks[k].pj)} con primer dueño empresa`,
+    tip: k => `Semana del ${rangoDias(weeks[k].start, weeks[k].end)}: ${f0(weeks[k].n)} transferencias, ${f0(weeks[k].pj)} con nuevo dueño empresa`,
     tick: k => {
       if (weeks.length <= 18) return weeks[k].start.d + ' ' + MC[weeks[k].start.m - 1];
       const prev = weeks[k - 1];
@@ -1109,7 +1109,7 @@ function renderUsados() {
   }
   let n = 0, pj = 0, to = 0, fr = 0;
   ids.forEach(i => { n += U.n[i]; pj += U.pj[i]; to += U.to[i]; fr += U.fr[i]; });
-  const stats = [[f0(n), 'Vehículos transferidos'], [pc(pj / n), 'Primer dueño empresa'], [pc(fr / n), 'Desde comerciante habitual'], [pc(to / n), 'Hacia comerciante habitual']];
+  const stats = [[f0(n), 'Vehículos transferidos'], [pc(pj / n), 'Nuevo dueño empresa'], [pc(fr / n), 'Desde comerciante habitual'], [pc(to / n), 'Hacia comerciante habitual']];
   box.innerHTML = stats.map(x => `<div class="stat"><div class="v num">${x[0]}</div><div class="k">${x[1]}</div></div>`).join('');
   const perTxt = ids.length === 1 ? mLabel(U.months[ids[0]]) : `${mShort(U.months[ids[0]])} a ${mShort(U.months[ids[ids.length - 1]])}`;
   renderVolumen(ids);
@@ -1124,8 +1124,8 @@ function renderUsados() {
   const famBar = (rows, key) => rows.slice(0, 8).map(x => ({ label: uFamLabel(x[0]), v: x[key], tip: `${uFamLabel(x[0])}: ${f0(x[key])}`, click: () => pickUsado(x[0]), on: uPick === x[0] }));
   bars($('#u-modelos'), famBar(fams, 1));
   flujoHTML($('#u-dueno'), [
-    { label: 'Primer dueño persona', v: n - pj, color: 'var(--s1)' },
-    { label: 'Primer dueño empresa', v: pj, color: 'var(--s2)' },
+    { label: 'Nuevo dueño persona', v: n - pj, color: 'var(--s1)' },
+    { label: 'Nuevo dueño empresa', v: pj, color: 'var(--s2)' },
   ]);
   flujoHTML($('#u-flujo'), [
     { label: 'Transferencia común', v: Math.max(0, n - to - fr), color: 'var(--s1)' },
@@ -1154,7 +1154,7 @@ function renderUsados() {
   const ya = U.fy[uPick].map((v, k) => v > 0 ? [U.years[k], v] : null).filter(Boolean);
   const y0 = ya.length ? ya[0][0] : null, y1 = ya.length ? ya[ya.length - 1][0] : null;
   $('#u-det').innerHTML = `<h3 style="margin-top:16px">${esc(lab)}</h3>
-    <div class="kv"><span><b>${f0(un)}</b> transferencias en el período</span><span>primer dueño empresa <b>${un ? pc(upj / un) : '–'}</b></span><span>hacia comerciante <b>${un ? pc(uto / un) : '–'}</b></span><span>desde comerciante <b>${un ? pc(ufr / un) : '–'}</b></span>${y0 ? `<span>inscripción vista <b>${y0}${y0 === y1 ? '' : ' a ' + y1}</b>, en todas las transferencias cargadas</span>` : ''}</div>
+    <div class="kv"><span><b>${f0(un)}</b> transferencias en el período</span><span>nuevo dueño empresa <b>${un ? pc(upj / un) : '–'}</b></span><span>hacia comerciante <b>${un ? pc(uto / un) : '–'}</b></span><span>desde comerciante <b>${un ? pc(ufr / un) : '–'}</b></span>${y0 ? `<span>inscripción vista <b>${y0}${y0 === y1 ? '' : ' a ' + y1}</b>, en todas las transferencias cargadas</span>` : ''}</div>
     <div id="u-det-anio" style="margin-top:10px"></div>`;
   if (ya.length) {
     const porAnio = preYearMap(uPick);
@@ -1292,13 +1292,183 @@ function renderMapaUsados() {
   }
 }
 
+/* ---------- bajas y robos ---------- */
+let BAJ = null, ROB = null;
+const AGE_LAB = ['0 a 1 año', '2 a 3 años', '4 a 6', '7 a 10', '11 a 15', '16 o más'];
+const EV_COL = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--ink)'];
+function prepEvento(d) {
+  d.pos = new Map(d.months.map((m, i) => [m, i]));
+  return d;
+}
+async function loadEvento(file) {
+  try { return prepEvento(await getMonthJSON(file)); }
+  catch (e) { console.error(e); return null; }
+}
+function eventIds(D) {
+  if (!D || !st.months.length) return [];
+  const ids = [];
+  for (const m of st.months) { const i = D.pos.get(m); if (i !== undefined) ids.push(i); }
+  return ids;
+}
+function renderEvento(D, p, opts) {
+  const box = $('#' + p + '-stats');
+  if (!box) return;
+  if (!D) { box.innerHTML = '<div class="stat"><div class="k">Todavía no están cargados estos datos.</div></div>'; return; }
+  const ids = eventIds(D);
+  if (!ids.length) { box.innerHTML = '<div class="stat"><div class="k">No hay datos en el período.</div></div>'; return; }
+  const sum = arr => ids.reduce((s, i) => s + (arr[i] || 0), 0);
+  const n = sum(D.n), co = sum(D.co), ok = sum(D.cook), parcial = sum(D.parcial), early = sum(D.early);
+  const stats = [[f0(n), 'Vehículos'], [f0(co), 'Con cotitulares'], [co ? pc(ok / co) : '–', 'De esos, las partes suman 100'], [f0(parcial), 'Una sola parte, menor al 100%']];
+  if (opts.early) stats.push([n ? pc(early / n) : '–', 'Antes de los 2 años']);
+  if (opts.net) {
+    const den = sum(D.sub[0]) + sum(D.sub[1]), rec = sum(D.sub[2]);
+    stats.push([f0(den - rec), 'Denuncias menos recuperos']);
+  }
+  box.innerHTML = stats.map(x => `<div class="stat"><div class="v num">${x[0]}</div><div class="k">${x[1]}</div></div>`).join('');
+  renderEventoVolumen(D, p, ids);
+  const famN = D.fams.map((_, f) => ids.reduce((s, i) => s + (D.fs[f][i] || 0), 0));
+  const brands = D.brands.map((_, b) => [b, ids.reduce((s, i) => s + (D.bs[b][i] || 0), 0)]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  bars($('#' + p + '-marcas'), brands.slice(0, 12).map(([b, v]) => ({ label: tc(D.brands[b]), v, tip: `${tc(D.brands[b])}: ${f0(v)}` })));
+  const abrir = f => {
+    const brand = D.brands[D.fams[f][0]], name = D.fams[f][1], k = IX.famKey.get(brand + '|' + name);
+    $('#q').value = tc(brand) + ' ' + tc(name);
+    suggest($('#q').value);
+    if (k !== undefined) { st.followModel = true; showFam(k); $('#buscador').scrollIntoView({ behavior: 'smooth' }); }
+  };
+  const fams = famN.map((v, f) => [f, v]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  bars($('#' + p + '-modelos'), fams.slice(0, 12).map(([f, v]) => {
+    const brand = D.brands[D.fams[f][0]], name = D.fams[f][1];
+    return { label: tc(brand) + ' ' + tc(name), v, tip: `${tc(brand)} ${tc(name)}: ${f0(v)}`, click: () => abrir(f) };
+  }));
+  bars($('#' + p + '-edad'), AGE_LAB.map((lb, i) => ({ label: lb, v: sum(D.age[i]) })).filter(x => x.v > 0));
+  if (opts.early) {
+    const rank = famN.map((v, f) => [f, v, ids.reduce((s, i) => s + (D.fe[f][i] || 0), 0)]).filter(x => x[1] >= 30).sort((a, b) => b[2] / b[1] - a[2] / a[1]).slice(0, 8);
+    bars($('#' + p + '-temprana'), rank.map(([f, v, e]) => {
+      const brand = D.brands[D.fams[f][0]], name = D.fams[f][1];
+      return { label: tc(brand) + ' ' + tc(name), v: 100 * e / v, tip: `${tc(brand)} ${tc(name)}: ${pc(e / v)} (${f0(e)} de ${f0(v)})`, click: () => abrir(f) };
+    }));
+  }
+  if (opts.net) {
+    const rank = famN.map((v, f) => {
+      const den = ids.reduce((s, i) => s + (D.sk[0][f][i] || 0) + (D.sk[1][f][i] || 0), 0);
+      const rec = ids.reduce((s, i) => s + (D.sk[2][f][i] || 0), 0);
+      return [f, den, rec];
+    }).filter(x => x[1] >= 30).sort((a, b) => b[2] / b[1] - a[2] / a[1]).slice(0, 8);
+    bars($('#' + p + '-ratio'), rank.map(([f, den, rec]) => {
+      const brand = D.brands[D.fams[f][0]], name = D.fams[f][1];
+      return { label: tc(brand) + ' ' + tc(name), v: 100 * rec / den, tip: `${tc(brand)} ${tc(name)}: ${f0(rec)} recuperos cada ${f0(den)} denuncias`, click: () => abrir(f) };
+    }));
+  }
+  const by = new Map();
+  if (D.ps && D.pk) D.pk.forEach((k, pi) => { const v = ids.reduce((s, i) => s + (D.ps[pi][i] || 0), 0); if (v) by.set(k, v); });
+  paintMap($('#' + p + '-mapa'), $('#' + p + '-mapa-bars'), $('#' + p + '-mapa-cap'), countsByMap(by), opts.map);
+  const note = $('#' + p + '-note');
+  if (note) note.textContent = opts.note;
+}
+function renderBajas() {
+  renderEvento(BAJ, 'b', {
+    early: true, chart: 'Bajas por mes', map: 'Dónde se dan de baja',
+    note: 'Cada vehículo cuenta una vez. Si el mismo día, registro, modelo y año aparecen en varias filas, son cotitulares, y se muestra si esas partes suman 100. Una baja no se puede unir a un robo ni a una transferencia: no hay dominio.',
+  });
+}
+function renderRobos() {
+  renderEvento(ROB, 'r', {
+    net: true, chart: 'Robos y recuperos por mes', map: 'Dónde se denuncian',
+    note: 'Robo o hurto y retención indebida van aparte. Un recupero no se puede atribuir a la misma denuncia: no hay dominio. El saldo es denuncias menos recuperos del período, no una tasa de autos sin recuperar.',
+  });
+}
+function eventoLeyenda(D, p) {
+  const el = $('#' + p + '-mes-leg');
+  if (el) el.innerHTML = D.labels.map((lb, s) => `<div><span class="sw" style="background:${EV_COL[s % EV_COL.length]}"></span>${esc(lb)}</div>`).join('');
+}
+function diasEvento(D, ids) {
+  const out = [];
+  ids.forEach(i => {
+    const [y, mo] = D.months[i].split('-').map(Number);
+    const nDays = new Date(y, mo, 0).getDate();
+    for (let d = 1; d <= nDays; d++) {
+      const sub = D.labels.map((_, s) => (D.sd[s][i] && D.sd[s][i][d - 1]) || 0);
+      out.push({ y, m: mo, d, n: sub.reduce((s, x) => s + x, 0), sub, dt: new Date(y, mo - 1, d) });
+    }
+  });
+  return out;
+}
+function semanasEvento(days) {
+  const weeks = [];
+  let cur = null;
+  days.forEach(day => {
+    const key = isoWeekKey(day.y, day.m, day.d);
+    if (!cur || cur.key !== key) {
+      cur = { key, start: day, end: day, n: 0, sub: day.sub.map(() => 0) };
+      weeks.push(cur);
+    }
+    cur.n += day.n;
+    cur.sub = cur.sub.map((v, s) => v + day.sub[s]);
+    cur.end = day;
+  });
+  return weeks;
+}
+function renderEventoVolumen(D, p, ids) {
+  const key = p === 'b' ? 'bGran' : 'rGran';
+  const g = st[key] || (ids.length === 1 ? 'w' : 'm');
+  document.querySelectorAll('#' + p + '-gran button').forEach(b => b.setAttribute('aria-pressed', b.dataset.g === g ? 'true' : 'false'));
+  const titulo = $('#' + p + '-vol-h');
+  const noun = p === 'b' ? 'Bajas' : 'Robos y recuperos';
+  if (titulo) titulo.textContent = g === 'd' ? noun + ' por día' : g === 'w' ? noun + ' por semana' : noun + ' por mes';
+  const serie = rows => D.labels.map((_, s) => ({ color: EV_COL[s % EV_COL.length], v: rows.map(row => row[s] || 0) }));
+  const partes = vals => D.labels.map((lb, s) => lb + ' ' + f0(vals[s] || 0)).join(', ');
+  if (g === 'm' || !D.sd) {
+    chart($('#' + p + '-mes'), {
+      cats: ids, series: serie(ids.map(i => D.labels.map((_, s) => D.sub[s][i] || 0))), h: 180, label: noun + ' por mes',
+      tip: k => `${mLabel(D.months[ids[k]])}: ${f0(D.n[ids[k]])} · ` + partes(D.labels.map((_, s) => D.sub[s][ids[k]] || 0)),
+      tick: k => {
+        const m = D.months[ids[k]], len = ids.length;
+        if (len <= 14) return mShort(m);
+        if (len <= 40) return m.endsWith('-01') || m.endsWith('-07') ? mShort(m) : '';
+        return m.endsWith('-01') ? m.slice(0, 4) : '';
+      },
+    });
+    eventoLeyenda(D, p);
+    return;
+  }
+  const days = diasEvento(D, ids);
+  if (g === 'd') {
+    chart($('#' + p + '-mes'), {
+      cats: days, series: serie(days.map(x => x.sub)), h: 180, label: noun + ' por día',
+      alpha: k => { const w = days[k].dt.getDay(); return w === 0 || w === 6 ? 0.4 : 1; },
+      tip: k => `${DOW[days[k].dt.getDay()]} ${days[k].d} de ${MESES[days[k].m - 1]} de ${days[k].y}: ${f0(days[k].n)} · ` + partes(days[k].sub),
+      tick: k => days.length <= 45 ? ((days[k].d === 1 || days[k].d % 5 === 0) ? String(days[k].d) : '') : (days[k].d === 1 ? MC[days[k].m - 1] + ' ' + String(days[k].y).slice(2) : ''),
+    });
+    eventoLeyenda(D, p);
+    return;
+  }
+  const weeks = semanasEvento(days);
+  chart($('#' + p + '-mes'), {
+    cats: weeks, series: serie(weeks.map(x => x.sub)), h: 180, label: noun + ' por semana',
+    tip: k => `Semana del ${rangoDias(weeks[k].start, weeks[k].end)}: ${f0(weeks[k].n)} · ` + partes(weeks[k].sub),
+    tick: k => {
+      if (weeks.length <= 18) return weeks[k].start.d + ' ' + MC[weeks[k].start.m - 1];
+      const prev = weeks[k - 1];
+      if (!prev || weeks[k].start.y !== prev.start.y) return String(weeks[k].start.y);
+      if (weeks.length <= 80 && weeks[k].start.m !== prev.start.m) return MC[weeks[k].start.m - 1];
+      return '';
+    },
+  });
+  eventoLeyenda(D, p);
+}
+['b', 'r'].forEach(p => {
+  document.querySelectorAll('#' + p + '-gran button').forEach(b => {
+    b.onclick = () => { st[p === 'b' ? 'bGran' : 'rGran'] = b.dataset.g; p === 'b' ? renderBajas() : renderRobos(); };
+  });
+});
+
 /* ---------- ciclo principal ---------- */
 function update() {
   sel = buildSel(st.months, true);
   renderHint(); renderStats(); renderTiempo(); renderOrigen(); renderListas(); renderRaros(); renderExoticos(); renderClasicos(); renderElectricos();
-  renderEvo(); renderUsados(); renderMapa(); renderMapaUsados();
+  renderEvo(); renderUsados(); renderBajas(); renderRobos(); renderMapa(); renderMapaUsados();
 }
-let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (IX && st.months.length) { renderTiempo(); renderEvo(); renderExoticos(); renderUsados(); if (st.ifam >= 0) showFam(st.ifam); } }, 150); });
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (IX && st.months.length) { renderTiempo(); renderEvo(); renderExoticos(); renderUsados(); renderBajas(); renderRobos(); if (st.ifam >= 0) showFam(st.ifam); } }, 150); });
 
 /* ---------- arranque ---------- */
 async function init() {
@@ -1326,10 +1496,16 @@ async function init() {
   const h = location.hash.slice(1);
   const start = /^\d{4}-\d{2}$/.test(h) && IX.pos.has(h) && IX.months[IX.pos.get(h)].file ? 'm:' + h : 'm:' + z;
   suggest('');
-  const pendientes = loadUsados();
+  const pendientes = Promise.all([
+    loadUsados(),
+    loadEvento('bajas.json.gz').then(d => { BAJ = d; }),
+    loadEvento('robos.json.gz').then(d => { ROB = d; }),
+  ]);
   await setPeriod(start);
   showFam(0);
   await pendientes;
+  renderBajas();
+  renderRobos();
 }
 init();
 })();

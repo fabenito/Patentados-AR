@@ -384,14 +384,15 @@ def prov_idx(s):
     return i
 
 
-def leer_transferencia(path: Path) -> pd.DataFrame:
+def leer_transferencia(path: Path, columnas=None) -> pd.DataFrame:
+    columnas = TRANS_COLS if columnas is None else columnas
     ultimo = None
     for enc in ("utf-8-sig", "latin-1"):
         for sep in (",", ";"):
             try:
                 df = pd.read_csv(
                     path, encoding=enc, sep=sep, dtype=str, low_memory=False,
-                    usecols=lambda c: str(c).strip().lower() in TRANS_COLS,
+                    usecols=lambda c: str(c).strip().lower() in columnas,
                 )
             except Exception as e:  # noqa: BLE001
                 ultimo = e
@@ -688,6 +689,204 @@ def procesar_transferencias(entradas, out_dir: Path):
     print(f"  Recorridos de modelos con pocas transferencias: {len(rv):,} nombres, hasta {RARE_FAM} autos cada uno. {rv_all - len(rv):,} quedaron afuera por ser un modelo común. {len(overflow):,} por tener más de {RARE_MAX} transferencias.")
 
 
+EVENT_COLS = TRANS_COLS | {"registro_seccional_codigo"}
+EVENTOS = {
+    "baja": {
+        "file": "bajas.json.gz",
+        "labels": ["Recupero de piezas", "Baja por antigüedad", "Exportación definitiva", "Baja temporal"],
+    },
+    "robo": {
+        "file": "robos.json.gz",
+        "labels": ["Robo o hurto", "Retención indebida", "Recupero"],
+    },
+}
+
+
+def subtipo_evento(kind: str, texto: str) -> int:
+    t = str(texto).upper()
+    if kind == "baja":
+        if "RECUPERACION DE PIEZAS" in t:
+            return 0
+        if "ENVEJ" in t:
+            return 1
+        if "EXPORT" in t:
+            return 2
+        if "TEMPORAL" in t:
+            return 3
+        return -1
+    if "RECUPERO" in t:
+        return 2
+    if "RETENCION" in t:
+        return 1
+    if "ROBO" in t or "HURTO" in t:
+        return 0
+    return -1
+
+
+def procesar_eventos(kind: str, entradas, out_dir: Path):
+    """Una baja o un robo por vehículo. Varias filas con el mismo día, registro,
+    modelo y año son cotitulares: cuentan una vez, y se anota si las partes suman 100."""
+    spec = EVENTOS[kind]
+    nsub = len(spec["labels"])
+    paths = []
+    for e in entradas:
+        p = Path(e)
+        paths.extend(sorted(p.glob("*.csv")) if p.is_dir() else [p])
+    if not paths:
+        raise SystemExit(f"No encontré CSV de {kind}.")
+    por_mes = {}
+    for p in paths:
+        mes = mes_del_nombre(p)
+        if not mes:
+            raise SystemExit(f"{p.name}: no pude leer el mes del nombre.")
+        por_mes.setdefault(mes, []).append(p)
+    eje = eje_meses(sorted(por_mes))
+    pos = {m: i for i, m in enumerate(eje)}
+    mlen = len(eje)
+    nprov = len(PROV_KEYS)
+    keys = ["td", "sec", "marca", "modelo", "anio", "insc", "sub"]
+    fams = {}
+    g_n = np.zeros(mlen)
+    g_co = np.zeros(mlen)
+    g_ok = np.zeros(mlen)
+    g_parcial = np.zeros(mlen)
+    g_pj = np.zeros(mlen)
+    g_early = np.zeros(mlen)
+    g_sub = np.zeros((nsub, mlen))
+    g_sd = np.zeros((nsub, mlen, 31))
+    g_age = np.zeros((6, mlen))
+    g_ps = np.zeros((nprov, mlen))
+
+    def slot_de(b, f):
+        key = (b, f)
+        slot = fams.get(key)
+        if slot is None:
+            slot = {"n": np.zeros(mlen), "e": np.zeros(mlen), "s": np.zeros((nsub, mlen)), "p": np.zeros(nprov)}
+            fams[key] = slot
+        return slot
+
+    for mes, files in por_mes.items():
+        i = pos[mes]
+        for path in files:
+            df = leer_transferencia(path, EVENT_COLS)
+            tipo = limpiar(col(df, "tramite_tipo"), "")
+            df = df[tipo.str.lower() != "tramite_tipo"].copy()
+            tipo = tipo.loc[df.index]
+            if df.empty:
+                continue
+            pct = pd.to_numeric(col(df, "titular_porcentaje_titularidad", "100"), errors="coerce").fillna(100).clip(0, 100)
+            tram = pd.to_datetime(col(df, "tramite_fecha", ""), errors="coerce")
+            insc = pd.to_datetime(col(df, "fecha_inscripcion_inicial", ""), errors="coerce")
+            age = (tram - insc).dt.days / 365.25
+            band = np.select([age < 2, age < 4, age < 7, age < 11, age < 16, age >= 16], [0, 1, 2, 3, 4, 5], default=-1)
+            modelo = limpiar(col(df, "automotor_modelo_descripcion"), "SIN DATO")
+            marca = limpiar(col(df, "automotor_marca_descripcion"), "SIN DATO")
+            base = pd.DataFrame({
+                "td": tram.dt.strftime("%Y-%m-%d").fillna("").to_numpy(),
+                "sec": limpiar(col(df, "registro_seccional_codigo"), "").to_numpy(),
+                "marca": marca.to_numpy(),
+                "modelo": modelo.to_numpy(),
+                "fam": modelo.map(familia).to_numpy(),
+                "anio": pd.to_numeric(col(df, "automotor_anio_modelo", "0"), errors="coerce").fillna(0).astype(int).to_numpy(),
+                "insc": insc.dt.strftime("%Y-%m-%d").fillna("").to_numpy(),
+                "sub": tipo.map(lambda t: subtipo_evento(kind, t)).to_numpy(),
+                "pct": pct.to_numpy(),
+                "pj": limpiar(col(df, "titular_tipo_persona"), "").str.lower().str.startswith("j").to_numpy(),
+                "pi": limpiar(col(df, "registro_seccional_provincia"), "").map(prov_idx).to_numpy(),
+                "band": np.asarray(band),
+                "early": ((age >= 0) & (age < 2)).fillna(False).to_numpy(),
+            })
+            base = base[base["sub"] >= 0]
+            if base.empty:
+                print(f"  {path.name} -> {mes}: sin filas útiles", flush=True)
+                continue
+            base = base.sort_values("pct", ascending=False)
+            uno = base.groupby(keys, sort=False).agg(
+                nrows=("pct", "size"), psum=("pct", "sum"),
+                fam=("fam", "first"), pj=("pj", "first"), pi=("pi", "first"),
+                band=("band", "first"), early=("early", "first"),
+            ).reset_index()
+            g_n[i] += len(uno)
+            co = uno.nrows > 1
+            g_co[i] += int(co.sum())
+            g_ok[i] += int((co & uno.psum.between(99, 101)).sum())
+            g_parcial[i] += int(((uno.nrows == 1) & (uno.psum < 99)).sum())
+            g_pj[i] += int(uno.pj.sum())
+            g_early[i] += int(uno.early.sum())
+            for s in range(nsub):
+                g_sub[s, i] += int((uno["sub"] == s).sum())
+            yy, mm = int(mes[:4]), int(mes[5:7])
+            fechas = pd.to_datetime(uno["td"], errors="coerce")
+            dia = fechas.dt.day.fillna(0).astype(int)
+            en_mes = (fechas.dt.year.fillna(0).astype(int) == yy) & (fechas.dt.month.fillna(0).astype(int) == mm)
+            dia_ok = en_mes & dia.between(1, 31)
+            if dia_ok.any():
+                for s in range(nsub):
+                    msk = dia_ok & (uno["sub"] == s)
+                    if msk.any():
+                        g_sd[s, i] += np.bincount(dia[msk].to_numpy() - 1, minlength=31)
+            for b in range(6):
+                g_age[b, i] += int((uno.band == b).sum())
+            conocida = uno[uno.pi >= 0]
+            if len(conocida):
+                vc = conocida.pi.value_counts()
+                g_ps[vc.index.to_numpy().astype(int), i] += vc.to_numpy()
+            for (b, f), part in uno.groupby(["marca", "fam"], sort=False):
+                slot = slot_de(b, f)
+                slot["n"][i] += len(part)
+                slot["e"][i] += int(part.early.sum())
+                for s in range(nsub):
+                    slot["s"][s, i] += int((part["sub"] == s).sum())
+                prov = part[part.pi >= 0].pi.value_counts()
+                for p, v in prov.items():
+                    slot["p"][int(p)] += int(v)
+            print(f"  {path.name} -> {mes}: {len(df):,} filas, {len(uno):,} vehículos", flush=True)
+
+    brand_n = {}
+    for (b, _), slot in fams.items():
+        acc = brand_n.get(b)
+        if acc is None:
+            acc = np.zeros(mlen)
+            brand_n[b] = acc
+        acc += slot["n"]
+    brands = sorted(brand_n, key=lambda b: -brand_n[b].sum())
+    bidx = {b: i for i, b in enumerate(brands)}
+    fkeys = sorted(fams, key=lambda k: -fams[k]["n"].sum())
+    data = {
+        "kind": kind,
+        "labels": spec["labels"],
+        "months": eje,
+        "n": [limpio(x) for x in g_n],
+        "co": [limpio(x) for x in g_co],
+        "cook": [limpio(x) for x in g_ok],
+        "parcial": [limpio(x) for x in g_parcial],
+        "pj": [limpio(x) for x in g_pj],
+        "early": [limpio(x) for x in g_early],
+        "sub": [[limpio(x) for x in g_sub[s]] for s in range(nsub)],
+        "sd": [[[limpio(x) for x in g_sd[s, i]] for i in range(mlen)] for s in range(nsub)],
+        "age": [[limpio(x) for x in g_age[b]] for b in range(6)],
+        "pk": [k for k, _ in PROV_KEYS],
+        "ps": [[limpio(x) for x in g_ps[p]] for p in range(nprov)],
+        "brands": brands,
+        "bs": [[limpio(x) for x in brand_n[b]] for b in brands],
+        "fams": [[bidx[b], f] for b, f in fkeys],
+        "fs": [[limpio(x) for x in fams[k]["n"]] for k in fkeys],
+        "fe": [[limpio(x) for x in fams[k]["e"]] for k in fkeys],
+        "sk": [[[limpio(x) for x in fams[k]["s"][s]] for k in fkeys] for s in range(nsub)],
+        "fp": [[[j, limpio(v)] for j, v in enumerate(fams[k]["p"]) if v >= 0.5] for k in fkeys],
+    }
+    # brand series: the sum() above builds a new array each time but sum of ndarrays works.
+    raw = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    dest = out_dir / spec["file"]
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.GzipFile(filename="", mode="wb", fileobj=open(dest, "wb"), compresslevel=9, mtime=0) as gz:
+        gz.write(raw)
+    print(f"{kind}: {len(por_mes)} meses ({eje[0]} a {eje[-1]}), {len(brands)} marcas, {len(fkeys)} modelos, "
+          f"{g_n.sum():,.0f} vehículos, {dest.stat().st_size / 1e6:.1f} MB.")
+    print(f"  Cotitulares: {g_co.sum():,.0f}. Partes que suman 100: {g_ok.sum():,.0f}. Una fila con menos del 100%: {g_parcial.sum():,.0f}.")
+    print(f"  Sin día de trámite dentro del mes: {g_n.sum() - g_sd.sum():,.0f} vehículos.")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -697,12 +896,18 @@ def main():
     r = sub.add_parser("reindex", help="reconstruir el índice")
     t = sub.add_parser("transfers", help="procesar CSV de transferencias")
     t.add_argument("csv", nargs="+", help="archivos CSV o una carpeta")
-    for p in (a, r, t):
+    e = sub.add_parser("eventos", help="procesar CSV de bajas o de robos y recuperos")
+    e.add_argument("kind", choices=["baja", "robo"])
+    e.add_argument("csv", nargs="+", help="archivos CSV o una carpeta")
+    for p in (a, r, t, e):
         p.add_argument("--out", default=str(DEFAULT_OUT))
     args = ap.parse_args()
     out = Path(args.out)
     if args.cmd == "transfers":
         procesar_transferencias(args.csv, out)
+        return
+    if args.cmd == "eventos":
+        procesar_eventos(args.kind, args.csv, out)
         return
     if args.cmd == "add":
         for f in args.csv:

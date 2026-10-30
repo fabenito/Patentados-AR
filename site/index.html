@@ -17,7 +17,7 @@
   <header class="mast">
     <div class="plate" aria-label="Patentados AR"><div class="band">ARGENTINA</div><div class="nm">Patentados</div></div>
     <div>
-      <p>Todo lo que se patentó por primera vez en Argentina, mes a mes: 0 km, importados, clásicos, camiones y acoplados. Buscá un modelo, elegí el período y mirá qué tan raro es lo que te gusta. Más abajo están las transferencias: qué se reventa y, de esos usados, cuándo se habían patentado.</p>
+      <p>Todo lo que se patentó por primera vez en Argentina, mes a mes: 0 km, importados, clásicos, camiones y acoplados. Buscá un modelo, elegí el período y mirá qué tan raro es lo que te gusta. Más abajo están las transferencias, las bajas y los robos.</p>
       <p class="src" id="cobertura">Cargando datos…</p>
     </div>
   </header>
@@ -172,11 +172,11 @@
           <div><h3>Modelos más transferidos <span class="hint">tocá para buscar</span></h3><div id="u-modelos" class="bars"></div></div>
         </div>
         <div class="grid" style="margin-top:16px">
-          <div><h3>Primer dueño</h3><div id="u-dueno"></div></div>
+          <div><h3>Nuevo dueño</h3><div id="u-dueno"></div></div>
           <div><h3>Tipo de trámite</h3><div id="u-flujo"></div></div>
         </div>
         <div class="grid" style="margin-top:16px">
-          <div><h3>Patentados a una empresa y luego transferidos</h3><div id="u-empresa" class="bars"></div></div>
+          <div><h3>Transferidos a una empresa</h3><div id="u-empresa" class="bars"></div></div>
           <div><h3>Salidos de un comerciante habitual</h3><div id="u-desde" class="bars"></div></div>
         </div>
         <h3 style="margin-top:16px">Hacia un comerciante habitual</h3>
@@ -194,13 +194,71 @@
         <div id="u-anio"></div>
         <div class="legend row-legend" id="u-anio-leg"></div>
         <div id="u-det"></div>
-        <p class="note">Cada fila pesa por su porcentaje de titularidad, igual que arriba. Un auto transferido dos veces cuenta dos veces: no hay dominio para reconocerlo. El titular del archivo es el primer dueño, el del patentamiento original, no quien compró el usado. «Hacia un comerciante habitual» y «desde un comerciante habitual» salen del tipo de trámite. El gráfico de años usa la fecha de inscripción inicial de esos usados. No es el total patentado ese año: antes de 2018 este sitio no tiene el padrón completo, y solo entran los autos que después aparecen en una transferencia del período.</p>
+        <p class="note">Cada fila pesa por su porcentaje de titularidad, igual que arriba. Un auto transferido dos veces cuenta dos veces: no hay dominio para reconocerlo. El titular de cada fila es quien figura en esa transferencia, el nuevo dueño. «Hacia un comerciante habitual» y «desde un comerciante habitual» salen del tipo de trámite. El gráfico de años usa la fecha de inscripción inicial de esos usados. No es el total patentado ese año: antes de 2018 este sitio no tiene el padrón completo, y solo entran los autos que después aparecen en una transferencia del período.</p>
+      </div>
+    </section>
+
+    <section id="bajas" aria-labelledby="h-bajas">
+      <div class="sec-h"><h2 id="h-bajas">Bajas</h2><span class="hint">Autos sacados del registro</span></div>
+      <div class="panel">
+        <div class="stats" id="b-stats"></div>
+        <h3 style="margin-top:14px"><span id="b-vol-h">Bajas por mes</span> <span class="hint">según el período de arriba</span></h3>
+        <div class="segctl" id="b-gran">
+          <button type="button" data-g="m" aria-pressed="true">Mes</button>
+          <button type="button" data-g="w" aria-pressed="false">Semana</button>
+          <button type="button" data-g="d" aria-pressed="false">Día</button>
+        </div>
+        <div id="b-mes"></div>
+        <div class="legend row-legend" id="b-mes-leg"></div>
+        <div class="grid" style="margin-top:16px">
+          <div><h3>Marcas</h3><div id="b-marcas" class="bars"></div></div>
+          <div><h3>Modelos</h3><div id="b-modelos" class="bars"></div></div>
+        </div>
+        <div class="grid" style="margin-top:16px">
+          <div><h3>Edad al momento de la baja</h3><div id="b-edad" class="bars"></div></div>
+          <div><h3>Baja antes de los 2 años <span class="hint">al menos 30 · la barra es el porcentaje</span></h3><div id="b-temprana" class="bars"></div></div>
+        </div>
+        <h3 style="margin-top:16px">Dónde se dan de baja</h3>
+        <div class="mapa-wrap">
+          <div id="b-mapa" class="mapa"></div>
+          <div><p class="lead" id="b-mapa-cap"></p><div id="b-mapa-bars" class="bars"></div></div>
+        </div>
+        <p class="note" id="b-note"></p>
+      </div>
+    </section>
+
+    <section id="robos" aria-labelledby="h-robos">
+      <div class="sec-h"><h2 id="h-robos">Robos y recuperos</h2><span class="hint">Denuncias y comunicaciones de recupero</span></div>
+      <div class="panel">
+        <div class="stats" id="r-stats"></div>
+        <h3 style="margin-top:14px"><span id="r-vol-h">Por mes</span> <span class="hint">según el período de arriba</span></h3>
+        <div class="segctl" id="r-gran">
+          <button type="button" data-g="m" aria-pressed="true">Mes</button>
+          <button type="button" data-g="w" aria-pressed="false">Semana</button>
+          <button type="button" data-g="d" aria-pressed="false">Día</button>
+        </div>
+        <div id="r-mes"></div>
+        <div class="legend row-legend" id="r-mes-leg"></div>
+        <div class="grid" style="margin-top:16px">
+          <div><h3>Marcas</h3><div id="r-marcas" class="bars"></div></div>
+          <div><h3>Modelos</h3><div id="r-modelos" class="bars"></div></div>
+        </div>
+        <div class="grid" style="margin-top:16px">
+          <div><h3>Edad al momento de la denuncia</h3><div id="r-edad" class="bars"></div></div>
+          <div><h3>Recuperos cada 100 denuncias <span class="hint">al menos 30 denuncias</span></h3><div id="r-ratio" class="bars"></div></div>
+        </div>
+        <h3 style="margin-top:16px">Dónde se denuncian</h3>
+        <div class="mapa-wrap">
+          <div id="r-mapa" class="mapa"></div>
+          <div><p class="lead" id="r-mapa-cap"></p><div id="r-mapa-bars" class="bars"></div></div>
+        </div>
+        <p class="note" id="r-note"></p>
       </div>
     </section>
   </main>
 
   <footer>
-    <p>Los números son vehículos, no filas del archivo. Un auto con dos titulares aparece en dos filas, así que cada fila se pesa por su porcentaje de titularidad. Son patentamientos iniciales: autos que se registraron por primera vez en ese mes. No es el parque automotor total, y un auto patentado antes del primer mes cargado no entra. Los precios de Mercado Libre que ves al tocar un enlace son los de hoy, no los del mes en que se patentó. Fuente: DNRPA, datos abiertos. Las transferencias son otro archivo y no se suman a los patentamientos de arriba. Este sitio no está afiliado al DNRPA ni a Mercado Libre.</p>
+    <p>Los números son vehículos, no filas del archivo. Un auto con dos titulares aparece en dos filas, así que cada fila se pesa por su porcentaje de titularidad. Son patentamientos iniciales: autos que se registraron por primera vez en ese mes. No es el parque automotor total, y un auto patentado antes del primer mes cargado no entra. Los precios de Mercado Libre que ves al tocar un enlace son los de hoy, no los del mes en que se patentó. Fuente: DNRPA, datos abiertos. Las transferencias, las bajas y los robos son otros archivos y no se suman a los patentamientos de arriba. Este sitio no está afiliado al DNRPA ni a Mercado Libre.</p>
   </footer>
 </div>
 <div id="tip" role="tooltip"></div>
